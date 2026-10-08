@@ -1,0 +1,119 @@
+import 'package:flutter/material.dart';
+
+import '../theme/conquera_theme.dart';
+import 'player_tag.dart';
+
+/// Full-width panel that sits directly under the top bar while a country
+/// is selected. Same surface and divider as the bar, so the two read as
+/// one header.
+class CountryInfoPanel extends StatelessWidget {
+  final String name;
+
+  /// Null means the country is unclaimed.
+  final String? ownerName;
+  final Color? ownerColor;
+  final String power;
+  final String building;
+  final VoidCallback onClose;
+
+  const CountryInfoPanel({
+    super.key,
+    required this.name,
+    required this.ownerName,
+    required this.ownerColor,
+    required this.power,
+    required this.building,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: ConqueraColors.surface,
+        border: Border(bottom: BorderSide(color: ConqueraColors.divider)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          ConqueraSpace.md,
+          ConqueraSpace.sm,
+          ConqueraSpace.sm,
+          ConqueraSpace.md,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ConqueraText.title,
+                  ),
+                ),
+                IconButton(
+                  onPressed: onClose,
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close, size: 20),
+                  color: ConqueraColors.muted,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            const SizedBox(height: ConqueraSpace.xs),
+            Padding(
+              padding: const EdgeInsets.only(right: ConqueraSpace.md),
+              child: Wrap(
+                spacing: ConqueraSpace.xl,
+                runSpacing: ConqueraSpace.md,
+                children: [
+                  _Stat(
+                    label: 'Owner',
+                    child: PlayerTag(
+                      name: ownerName ?? 'Unclaimed',
+                      color: ownerColor,
+                      style: ownerName == null
+                          ? ConqueraText.value
+                              .copyWith(color: ConqueraColors.muted)
+                          : ConqueraText.value,
+                    ),
+                  ),
+                  _Stat(
+                    label: 'Power',
+                    child: Text(power, style: ConqueraText.value),
+                  ),
+                  _Stat(
+                    label: 'Building',
+                    child: Text(building, style: ConqueraText.value),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _Stat({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: ConqueraText.label),
+        const SizedBox(height: ConqueraSpace.xs),
+        child,
+      ],
+    );
+  }
+}

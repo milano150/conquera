@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "28801310453",
+    "project_id": "conquera-fcdef",
+    "storage_bucket": "conquera-fcdef.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:28801310453:android:116d444de9f1a34a0f6fbc",
+        "android_client_info": {
+          "package_name": "com.example.conquera"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCEaBDkLBdYRH1l_7Zq_PNh6nqP26nXz44"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
