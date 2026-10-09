@@ -357,7 +357,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   value: pending,
                   hint: 'Select building',
                   items: GameRules.buildings,
-                  label: (b) => b.name,
+                  label: (b) => '${b.name}  ·  ${b.cost} gold',
                   isEnabled: (b) => gold >= b.cost,
                   onChanged: _busy
                       ? null
@@ -402,7 +402,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         value: unit,
         hint: 'Select unit',
         items: GameRules.units,
-        label: (u) => u.name,
+        label: (u) => '${u.name}  ·  ${u.cost} gold',
         isEnabled: (u) => gold >= u.cost,
         onChanged: _busy ? null : (u) => setState(() => _unit = u),
       ),

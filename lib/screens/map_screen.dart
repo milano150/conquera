@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config/game_rules.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
@@ -27,9 +28,10 @@ import '../widgets/province_detail_dialog.dart';
 /// scale recognizer. [PointerEvent.localPosition] arrives already in map
 /// coordinates, so no matrix math is needed for hit-testing.
 ///
-/// The map is two layers: a static base (all countries) and a small
-/// selection overlay that redraws as the zoom changes, so the outline
-/// keeps a constant on-screen thickness.
+/// The map is three layers: a static base (all countries), a badge layer
+/// (building icons and power numbers) and a small selection overlay. Icons
+/// and numbers have a fixed size on the map (they grow and shrink with it);
+/// the selection outline keeps a constant on-screen thickness.
 class MapScreen extends StatefulWidget {
   final String assetPath;
 
@@ -46,10 +48,36 @@ class _MapScreenState extends State<MapScreen> {
   Offset? _pointerDown;
   static const double _tapSlop = 12.0; // screen pixels
 
-  // Same zoom lock as Urbanize.
-  static const double _minScale = 0.5;
+  // Zoom limits. The most zoomed-out view is "Africa fills the screen", so
+  // the player can never see the whole planet at once.
   static const double _maxScale = 16;
   static const double _boundaryMargin = 400;
+
+  /// Extra room around Africa's bounding box at the zoomed-out limit.
+  static const double _africaPadding = 0.04;
+
+  /// Power numbers appear once the map is zoomed in to this many times the
+  /// most zoomed-out view. Higher = you have to zoom in further.
+  static const double _powerZoomFactor = 1.7;
+
+  /// Building icons and power numbers have a fixed size in MAP units (they
+  /// scale with the map like the countries do). These are how big they look
+  /// on screen at the zoom where they are first visible.
+  static const double _iconPxAtMinZoom = 20;
+  static const double _powerPxAtPowerZoom = 18;
+
+  /// Mainland Africa (ISO alpha-2). Far-off island nations (Cape Verde,
+  /// Mauritius, Seychelles, Comoros, Sao Tome) are left out so they don't
+  /// stretch the zoom-out limit.
+  static const Set<String> _africaIds = {
+    'DZ', 'AO', 'BJ', 'BW', 'BF', 'BI', 'CM', 'CF', 'TD', 'CG', 'CD', 'CI',
+    'DJ', 'EG', 'GQ', 'ER', 'SZ', 'ET', 'GA', 'GM', 'GH', 'GN', 'GW', 'KE',
+    'LS', 'LR', 'LY', 'MG', 'MW', 'ML', 'MR', 'MA', 'MZ', 'NA', 'NE', 'NG',
+    'RW', 'SN', 'SL', 'SO', 'ZA', 'SS', 'SD', 'TZ', 'TG', 'TN', 'UG', 'EH',
+    'ZM', 'ZW',
+  };
+
+  Rect? _africaRectCache;
 
   Size? _fittedFor; // viewport size the initial fit was computed for
 
@@ -104,15 +132,47 @@ class _MapScreenState extends State<MapScreen> {
     return min(viewport.width / map.width, viewport.height / map.height);
   }
 
-  /// Fits the whole map to the viewport and centers it. Runs on first
+  /// Bounding box of Africa (padded), or null if its countries aren't found.
+  Rect? _africaRect() {
+    final cached = _africaRectCache;
+    if (cached != null) return cached;
+
+    Rect? union;
+    for (final province in _controller.provinces) {
+      if (!_africaIds.contains(province.id)) continue;
+      union = union == null
+          ? province.bounds
+          : union.expandToInclude(province.bounds);
+    }
+    if (union == null) return null;
+
+    final pad = max(union.width, union.height) * _africaPadding;
+    return _africaRectCache = union.inflate(pad);
+  }
+
+  /// The most zoomed-out scale allowed: Africa fills the viewport. Never
+  /// lower than the whole-map fit.
+  double _minScaleFor(Size viewport) {
+    final whole = _fitScaleFor(viewport);
+    final africa = _africaRect();
+    if (africa == null || viewport.isEmpty) return whole;
+    final africaFit = min(
+      viewport.width / africa.width,
+      viewport.height / africa.height,
+    );
+    return max(whole, africaFit);
+  }
+
+  /// Starts at the zoomed-out limit, centered on Africa. Runs on first
   /// layout (and again if the window size changes).
   void _fitToViewport(Size viewport) {
     final map = _controller.mapSize;
     if (map.isEmpty || viewport.isEmpty) return;
 
-    final scale = _fitScaleFor(viewport);
-    final dx = (viewport.width - map.width * scale) / 2;
-    final dy = (viewport.height - map.height * scale) / 2;
+    final scale = _minScaleFor(viewport);
+    final focus = _africaRect()?.center ?? map.center(Offset.zero);
+    final dx = viewport.width / 2 - focus.dx * scale;
+    final dy = viewport.height / 2 - focus.dy * scale;
 
     _transform.value = Matrix4.identity()
       ..translate(dx, dy)
@@ -129,6 +189,25 @@ class _MapScreenState extends State<MapScreen> {
       if (owner != null) colors[id] = owner.color.withAlpha(_ownerFillAlpha);
     });
     return colors;
+  }
+
+  /// What to draw on top of each province: its building's icon and its
+  /// power. Provinces with neither get no badge.
+  List<MapBadge> _badges() {
+    final badges = <MapBadge>[];
+    _provinceStates.value.forEach((id, state) {
+      final province = _controller.provinceById(id);
+      if (province == null) return;
+
+      final icon = state.hasBuilding
+          ? GameRules.buildingById(state.buildingType)?.icon
+          : null;
+      final power = state.troops.floor();
+      if (icon == null && power <= 0) return;
+
+      badges.add(MapBadge(anchor: province.anchor, icon: icon, power: power));
+    });
+    return badges;
   }
 
   /// Opens the build / reinforce window for [province].
@@ -225,15 +304,16 @@ class _MapScreenState extends State<MapScreen> {
                         });
                       }
 
-                      // Urbanize's 0.5 floor, but never higher than the
-                      // fit-to-screen scale (so the initial view is valid).
-                      final minScale = min(_minScale, _fitScaleFor(viewport));
+                      // Can't zoom out past "Africa fills the screen".
+                      final minScale = _minScaleFor(viewport);
+                      final maxScale = max(_maxScale, minScale * 14);
+                      final powerMinScale = minScale * _powerZoomFactor;
 
                       return InteractiveViewer(
                         transformationController: _transform,
                         constrained: false,
                         minScale: minScale,
-                        maxScale: _maxScale,
+                        maxScale: maxScale,
                         boundaryMargin: const EdgeInsets.all(_boundaryMargin),
                         child: Listener(
                           behavior: HitTestBehavior.opaque,
@@ -250,6 +330,21 @@ class _MapScreenState extends State<MapScreen> {
                                     painter: MapPainter(
                                       provinces: _controller.provinces,
                                       ownerFillColors: _ownerFillColors(),
+                                    ),
+                                  ),
+                                ),
+                                IgnorePointer(
+                                  child: RepaintBoundary(
+                                    child: CustomPaint(
+                                      size: _controller.mapSize,
+                                      painter: BadgePainter(
+                                        badges: _badges(),
+                                        transform: _transform,
+                                        powerMinScale: powerMinScale,
+                                        iconSize: _iconPxAtMinZoom / minScale,
+                                        powerSize:
+                                            _powerPxAtPowerZoom / powerMinScale,
+                                      ),
                                     ),
                                   ),
                                 ),

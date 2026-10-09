@@ -195,12 +195,19 @@ class SvgMapParser {
 }
 
 /// Mutable accumulator used only while parsing; merges every sub-path that
-/// belongs to the same region and tracks the running bounding box.
+/// belongs to the same region, tracks the running bounding box, and works
+/// out where the region's map badge (building icon, power) should sit.
 class _ProvinceBuilder {
   final String id;
   final String name;
   final Path _mergedPath = Path();
   Rect? _bounds;
+
+  /// The biggest single shape (by bounding box). The badge goes inside it,
+  /// so a country with far-away islands (USA, France, ...) still gets its
+  /// badge on the mainland instead of somewhere in the ocean.
+  Path? _largestShape;
+  double _largestArea = -1;
 
   _ProvinceBuilder({required this.id, required this.name});
 
@@ -208,16 +215,106 @@ class _ProvinceBuilder {
     _mergedPath.addPath(shape, Offset.zero);
     final shapeBounds = shape.getBounds();
     _bounds = _bounds == null ? shapeBounds : _bounds!.expandToInclude(shapeBounds);
+
+    final area = shapeBounds.width * shapeBounds.height;
+    if (area > _largestArea) {
+      _largestArea = area;
+      _largestShape = shape;
+    }
   }
 
   Province build() {
+    final bounds = _bounds ?? Rect.zero;
     return Province(
       id: id,
       name: name,
       path: _mergedPath,
-      bounds: _bounds ?? Rect.zero,
+      bounds: bounds,
+      anchor: _findAnchor(bounds),
     );
   }
+
+  /// A point that is really inside the region, close to its visual centre.
+  Offset _findAnchor(Rect fallbackBounds) {
+    final shape = _largestShape;
+    if (shape == null) return fallbackBounds.center;
+
+    final centroid = _largestContourCentroid(shape);
+    if (centroid != null && shape.contains(centroid)) return centroid;
+
+    // Concave shapes (a crescent, a "C") can have their centroid outside
+    // them: take the nearest point that is inside instead.
+    return _nearestInsidePoint(
+      shape,
+      centroid ?? shape.getBounds().center,
+    );
+  }
+}
+
+/// Area-weighted centroid of the biggest closed outline in [shape], or
+/// null if it has none. The outline is sampled every few map units and the
+/// standard polygon-centroid (shoelace) formula is applied to the samples.
+Offset? _largestContourCentroid(Path shape) {
+  Offset? best;
+  var bestArea = 0.0;
+
+  for (final metric in shape.computeMetrics()) {
+    final length = metric.length;
+    if (length <= 0) continue;
+
+    final count = (length / 4).round().clamp(12, 400);
+    final step = length / count;
+    final points = <Offset>[];
+    for (var i = 0; i < count; i++) {
+      final tangent = metric.getTangentForOffset(i * step);
+      if (tangent != null) points.add(tangent.position);
+    }
+    if (points.length < 3) continue;
+
+    var doubleArea = 0.0;
+    var cx = 0.0;
+    var cy = 0.0;
+    for (var i = 0; i < points.length; i++) {
+      final a = points[i];
+      final b = points[(i + 1) % points.length];
+      final cross = a.dx * b.dy - b.dx * a.dy;
+      doubleArea += cross;
+      cx += (a.dx + b.dx) * cross;
+      cy += (a.dy + b.dy) * cross;
+    }
+    if (doubleArea.abs() <= bestArea) continue;
+
+    bestArea = doubleArea.abs();
+    best = Offset(cx / (3 * doubleArea), cy / (3 * doubleArea));
+  }
+
+  return best;
+}
+
+/// The point inside [shape] closest to [target], found on a coarse grid
+/// over the shape's bounding box. Only used when the centroid falls
+/// outside the shape, so the cost is negligible.
+Offset _nearestInsidePoint(Path shape, Offset target) {
+  final bounds = shape.getBounds();
+  const steps = 40;
+
+  Offset? best;
+  var bestDistance = double.infinity;
+  for (var iy = 0; iy < steps; iy++) {
+    for (var ix = 0; ix < steps; ix++) {
+      final p = Offset(
+        bounds.left + (ix + 0.5) / steps * bounds.width,
+        bounds.top + (iy + 0.5) / steps * bounds.height,
+      );
+      final distance = (p - target).distanceSquared;
+      if (distance < bestDistance && shape.contains(p)) {
+        bestDistance = distance;
+        best = p;
+      }
+    }
+  }
+
+  return best ?? bounds.center;
 }
 
 /// Rounds off a polygon's sharp vertices via Chaikin's corner-cutting

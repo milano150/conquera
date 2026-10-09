@@ -9,17 +9,23 @@ import 'dart:ui';
 /// shapes — mainland + islands — but should behave as one clickable
 /// unit). [bounds] is precomputed once so hit-testing can cheaply reject
 /// far-away taps before running the more expensive [Path.contains] check.
+///
+/// [anchor] is a point guaranteed to lie inside the region (on its biggest
+/// shape), close to its visual centre. It is where the building icon and
+/// power number are drawn.
 class Province {
   final String id;
   final String name;
   final Path path;
   final Rect bounds;
+  final Offset anchor;
 
   const Province({
     required this.id,
     required this.name,
     required this.path,
     required this.bounds,
+    required this.anchor,
   });
 
   @override

@@ -103,3 +103,133 @@ class SelectionPainter extends CustomPainter {
     return !identical(oldDelegate.path, path) || oldDelegate.scale != scale;
   }
 }
+/// One thing to draw on top of a province: its building icon and/or its
+/// power. Plain data, so the painter can tell cheaply whether anything
+/// changed.
+class MapBadge {
+  final Offset anchor;
+  final IconData? icon;
+
+  /// 0 means "nothing to show".
+  final int power;
+
+  const MapBadge({required this.anchor, this.icon, this.power = 0});
+
+  @override
+  bool operator ==(Object other) =>
+      other is MapBadge &&
+      other.anchor == anchor &&
+      other.icon == icon &&
+      other.power == power;
+
+  @override
+  int get hashCode => Object.hash(anchor, icon, power);
+}
+
+/// The badge layer: a building icon in the centre of each province that
+/// has one, with its power as a small grey number right under it.
+///
+/// Icons and numbers have a constant size in map units, so they scale with
+/// the map exactly like the countries do. Power numbers only appear once
+/// the map is zoomed in to [powerMinScale], so the zoomed-out view stays
+/// clean.
+///
+/// It repaints whenever the pan/zoom [transform] changes, without any
+/// widget rebuild, and caches its text so that stays cheap.
+class BadgePainter extends CustomPainter {
+  final List<MapBadge> badges;
+  final TransformationController transform;
+
+  /// Zoom level (the viewer's scale) from which power numbers are shown.
+  final double powerMinScale;
+
+  /// Icon height and power-number font size, in map units.
+  final double iconSize;
+  final double powerSize;
+
+  BadgePainter({
+    required this.badges,
+    required this.transform,
+    required this.powerMinScale,
+    required this.iconSize,
+    required this.powerSize,
+  }) : super(repaint: transform);
+
+  final Map<IconData, TextPainter> _iconCache = {};
+  final Map<int, TextPainter> _powerCache = {};
+
+  TextPainter _iconPainter(IconData icon) {
+    return _iconCache.putIfAbsent(icon, () {
+      return TextPainter(
+        text: TextSpan(
+          text: String.fromCharCode(icon.codePoint),
+          style: TextStyle(
+            fontSize: iconSize,
+            fontFamily: icon.fontFamily,
+            package: icon.fontPackage,
+            color: Colors.black,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+    });
+  }
+
+  TextPainter _powerPainter(int power) {
+    return _powerCache.putIfAbsent(power, () {
+      return TextPainter(
+        text: TextSpan(
+          text: '$power',
+          style: ConqueraText.label.copyWith(
+            fontSize: powerSize,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+    });
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scale = transform.value.getMaxScaleOnAxis();
+    if (scale <= 0) return;
+    final showPower = scale >= powerMinScale;
+
+    for (final badge in badges) {
+      final icon = badge.icon;
+      final showNumber = showPower && badge.power > 0;
+      if (icon == null && !showNumber) continue;
+
+      canvas.save();
+      canvas.translate(badge.anchor.dx, badge.anchor.dy);
+
+      if (icon != null) {
+        final painter = _iconPainter(icon);
+        painter.paint(
+          canvas,
+          Offset(-painter.width / 2, -painter.height / 2),
+        );
+      }
+
+      if (showNumber) {
+        final painter = _powerPainter(badge.power);
+        // Under the icon, or centred when the province has no building.
+        final top = icon != null ? iconSize / 2 : -painter.height / 2;
+        painter.paint(canvas, Offset(-painter.width / 2, top));
+      }
+
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant BadgePainter oldDelegate) {
+    return !listEquals(oldDelegate.badges, badges) ||
+        oldDelegate.powerMinScale != powerMinScale ||
+        oldDelegate.iconSize != iconSize ||
+        oldDelegate.powerSize != powerSize ||
+        !identical(oldDelegate.transform, transform);
+  }
+}
