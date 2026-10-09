@@ -2,6 +2,8 @@ import 'dart:ui';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../config/game_rules.dart';
+
 /// A player's document under games/{gameId}/players/{uid}.
 ///
 /// Gold is stored idle-style: a snapshot ([gold]) plus when it was taken
@@ -15,6 +17,9 @@ class PlayerState {
   final double goldRate;
   final DateTime? goldUpdatedAt;
 
+  /// When this player last attacked (null = never). Drives the cooldown.
+  final DateTime? lastAttackAt;
+
   const PlayerState({
     required this.uid,
     required this.displayName,
@@ -22,11 +27,13 @@ class PlayerState {
     required this.gold,
     required this.goldRate,
     required this.goldUpdatedAt,
+    this.lastAttackAt,
   });
 
   factory PlayerState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     final updated = data['goldUpdatedAt'];
+    final lastAttack = data['lastAttackAt'];
     return PlayerState(
       uid: doc.id,
       displayName: (data['displayName'] as String?) ?? 'Player',
@@ -35,8 +42,12 @@ class PlayerState {
       goldRate: (data['goldRate'] as num?)?.toDouble() ?? 0,
       // Null while a server timestamp is still pending right after a write.
       goldUpdatedAt: updated is Timestamp ? updated.toDate() : null,
+      lastAttackAt: lastAttack is Timestamp ? lastAttack.toDate() : null,
     );
   }
+
+  /// When the player may attack again (null = right now).
+  DateTime? get attackReadyAt => lastAttackAt?.add(GameRules.attackCooldown);
 
   /// "#RRGGBB" -> Color (opaque).
   Color get color {

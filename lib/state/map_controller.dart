@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
 import '../models/province.dart';
+import '../services/border_finder.dart';
 import '../services/svg_map_parser.dart';
 
 /// Owns the parsed map data and the current selection.
@@ -12,6 +13,7 @@ import '../services/svg_map_parser.dart';
 class MapController extends ChangeNotifier {
   List<Province> _provinces = const [];
   Map<String, Province> _provinceLookup = const {};
+  Map<String, Set<String>> _neighbors = const {};
   Size _mapSize = Size.zero;
   String? _selectedProvinceId;
   bool _isLoaded = false;
@@ -25,6 +27,9 @@ class MapController extends ChangeNotifier {
 
   Province? provinceById(String id) => _provinceLookup[id];
 
+  /// Ids of the provinces that share a border with [id].
+  Set<String> neighborsOf(String id) => _neighbors[id] ?? const <String>{};
+
   Province? get selectedProvince =>
       _selectedProvinceId == null ? null : _provinceLookup[_selectedProvinceId];
 
@@ -35,6 +40,7 @@ class MapController extends ChangeNotifier {
       _provinces = result.provinces;
       _provinceLookup = {for (final p in _provinces) p.id: p};
       _mapSize = result.size;
+      _neighbors = BorderFinder.find(_provinces, _mapSize);
       _isLoaded = true;
       _loadError = null;
     } catch (error, stackTrace) {

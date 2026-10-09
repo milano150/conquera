@@ -14,6 +14,7 @@ import '../painters/map_painter.dart';
 import '../services/firestore_service.dart';
 import '../state/map_controller.dart';
 import '../theme/conquera_theme.dart';
+import '../widgets/attack_dialog.dart';
 import '../widgets/country_info_panel.dart';
 import '../widgets/player_top_bar.dart';
 import '../widgets/province_detail_dialog.dart';
@@ -58,7 +59,7 @@ class _MapScreenState extends State<MapScreen> {
 
   /// Power numbers appear once the map is zoomed in to this many times the
   /// most zoomed-out view. Higher = you have to zoom in further.
-  static const double _powerZoomFactor = 1.7;
+  static const double _powerZoomFactor = 1.5;
 
   /// Building icons and power numbers have a fixed size in MAP units (they
   /// scale with the map like the countries do). These are how big they look
@@ -210,6 +211,36 @@ class _MapScreenState extends State<MapScreen> {
     return badges;
   }
 
+  /// Ids of the provinces the local player owns that border [target].
+  Set<String> _myBorderingIds(Province target) {
+    final states = _provinceStates.value;
+    return {
+      for (final id in _controller.neighborsOf(target.id))
+        if (states[id]?.ownerId == _uid) id,
+    };
+  }
+
+  /// Opens the battle window against [target].
+  void _openAttack(Province target) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AttackDialog(
+        gameId: FirestoreService.defaultGameId,
+        uid: _uid,
+        targetId: target.id,
+        targetName: target.name,
+        neighborIds: _controller.neighborsOf(target.id),
+        provinceNames: {
+          for (final p in _controller.provinces) p.id: p.name,
+        },
+        provinceStates: _provinceStates,
+        players: _players,
+        firestore: _firestore,
+      ),
+    );
+  }
+
   /// Opens the build / reinforce window for [province].
   void _openDetails(Province province) {
     showDialog<void>(
@@ -291,6 +322,16 @@ class _MapScreenState extends State<MapScreen> {
             final selectedState =
                 selected == null ? null : _provinceStates.value[selected.id];
             final selectedOwner = _players.value[selectedState?.ownerId];
+
+            // Another player's province gets an Attack button; it only works
+            // if one of the player's own provinces borders it.
+            final selectedOwnerId = selectedState?.ownerId;
+            final isEnemy = selected != null &&
+                selectedOwnerId != null &&
+                selectedOwnerId != _uid;
+            final canAttack =
+                selected != null && isEnemy && _myBorderingIds(selected).isNotEmpty;
+            final attackReadyAt = _players.value[_uid]?.attackReadyAt;
 
             return Stack(
               children: [
@@ -392,6 +433,10 @@ class _MapScreenState extends State<MapScreen> {
                             building: selectedState?.buildingLabel ?? 'None',
                             onClose: _controller.clearSelection,
                             onOpenDetails: () => _openDetails(selected),
+                            isEnemy: isEnemy,
+                            canAttack: canAttack,
+                            attackReadyAt: attackReadyAt,
+                            onAttack: () => _openAttack(selected),
                           ),
                   ),
                 ),

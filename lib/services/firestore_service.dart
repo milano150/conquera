@@ -1,7 +1,10 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../config/game_rules.dart';
+import '../models/attack_result.dart';
 import '../models/player_state.dart';
 import '../models/province_state.dart';
 
@@ -345,6 +348,184 @@ class FirestoreService {
     });
 
     if (error != null) throw GameActionException(error);
+  }
+
+  /// [uid] attacks [targetId] with every province they own among
+  /// [neighborIds] (the target's bordering provinces, worked out from the
+  /// map geometry by the caller).
+  ///
+  /// Attacker power X = the troops of those provinces added together;
+  /// defender power Y = the target's troops. Each side gets a small random
+  /// luck multiplier (see [GameRules.attackLuck]); the higher one wins, a
+  /// tie goes to the defender.
+  ///
+  /// Win: X is spread evenly over the attacking provinces and the annexed
+  /// province, which changes hands (building included).
+  /// Loss: the attacking provinces lose all their power, and the defender
+  /// loses the same amount (down to 0).
+  /// Either way the attacker's cooldown starts.
+  ///
+  /// Throws [GameActionException] if the attack isn't allowed.
+  ///
+  /// NOTE: runs on the client for now, like the other actions. Move it into
+  /// a Cloud Function (with its own border check) before real players.
+  Future<AttackResult> attackProvince({
+    required String gameId,
+    required String uid,
+    required String targetId,
+    required Iterable<String> neighborIds,
+    Random? random,
+  }) async {
+    final targetRef = _provincesRef(gameId).doc(targetId);
+    final attackerRef = _playerRef(gameId, uid);
+    final borderRefs = [
+      for (final id in neighborIds.toSet())
+        if (id != targetId) _provincesRef(gameId).doc(id),
+    ];
+    final rng = random ?? Random();
+
+    AttackResult? result;
+    String? error;
+
+    await _db.runTransaction<void>((tx) async {
+      result = null;
+      error = null;
+
+      // Every read first, then the writes.
+      final targetSnap = await tx.get(targetRef);
+      final attackerSnap = await tx.get(attackerRef);
+      final borderSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in borderRefs) {
+        borderSnaps.add(await tx.get(ref));
+      }
+
+      final targetData = targetSnap.data();
+      final defenderId = targetData?['ownerId'] as String?;
+      DocumentReference<Map<String, dynamic>>? defenderRef;
+      DocumentSnapshot<Map<String, dynamic>>? defenderSnap;
+      if (defenderId != null && defenderId != uid) {
+        defenderRef = _playerRef(gameId, defenderId);
+        defenderSnap = await tx.get(defenderRef);
+      }
+
+      if (!attackerSnap.exists) {
+        error = 'Player not found.';
+        return;
+      }
+      if (defenderId == null) {
+        error = "This province isn't owned by another player.";
+        return;
+      }
+      if (defenderId == uid) {
+        error = "You can't attack your own province.";
+        return;
+      }
+
+      final now = DateTime.now();
+      final readyAt = PlayerState.fromDoc(attackerSnap).attackReadyAt;
+      if (readyAt != null && now.isBefore(readyAt)) {
+        final secs = (readyAt.difference(now).inMilliseconds / 1000).ceil();
+        error = 'Your troops are still recovering ($secs s left).';
+        return;
+      }
+
+      final attackers = [
+        for (final snap in borderSnaps)
+          if (snap.exists && snap.data()?['ownerId'] == uid) snap,
+      ];
+      if (attackers.isEmpty) {
+        error = 'None of your provinces border this one.';
+        return;
+      }
+
+      var attackerPower = 0.0;
+      for (final snap in attackers) {
+        attackerPower += (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+      }
+      if (attackerPower <= 0) {
+        error = 'Your bordering provinces have no power to attack with.';
+        return;
+      }
+      final defenderPower = (targetData?['troops'] as num?)?.toDouble() ?? 0;
+
+      double luck() => 1 + (rng.nextDouble() * 2 - 1) * GameRules.attackLuck;
+      final attackerStrength = attackerPower * luck();
+      final defenderStrength = defenderPower * luck();
+      final won = attackerStrength > defenderStrength;
+
+      final attackedAt = Timestamp.fromDate(now);
+      final stamp = FieldValue.serverTimestamp();
+
+      if (won) {
+        // Normalize: X is shared evenly between the attackers and Y.
+        final share = attackerPower / (attackers.length + 1);
+        for (final snap in attackers) {
+          tx.update(snap.reference, {'troops': share, 'troopsUpdatedAt': stamp});
+        }
+
+        final mineDelta = _hasGoldMine(targetData) ? 1 : 0;
+        tx.update(targetRef, {
+          'ownerId': uid,
+          'troops': share,
+          'troopsUpdatedAt': stamp,
+        });
+        tx.update(attackerRef, {
+          ..._settledIncomeUpdate(
+            attackerSnap,
+            owned: _ownedCount(attackerSnap) + 1,
+            mines: _mineCount(attackerSnap) + mineDelta,
+            now: now,
+          ),
+          'lastAttackAt': attackedAt,
+        });
+        if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
+          tx.update(
+            defenderRef,
+            _settledIncomeUpdate(
+              defenderSnap,
+              owned: _ownedCount(defenderSnap) - 1,
+              mines: _mineCount(defenderSnap) - mineDelta,
+              now: now,
+            ),
+          );
+        }
+
+        result = AttackResult(
+          won: true,
+          attackerPower: attackerPower,
+          defenderPower: defenderPower,
+          attackerStrength: attackerStrength,
+          defenderStrength: defenderStrength,
+          attackerProvinceCount: attackers.length,
+          powerAfter: share,
+          defenderPowerLeft: 0,
+        );
+      } else {
+        final left = max(0.0, defenderPower - attackerPower);
+        for (final snap in attackers) {
+          tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
+        }
+        tx.update(targetRef, {'troops': left, 'troopsUpdatedAt': stamp});
+        tx.update(attackerRef, {'lastAttackAt': attackedAt});
+
+        result = AttackResult(
+          won: false,
+          attackerPower: attackerPower,
+          defenderPower: defenderPower,
+          attackerStrength: attackerStrength,
+          defenderStrength: defenderStrength,
+          attackerProvinceCount: attackers.length,
+          powerAfter: 0,
+          defenderPowerLeft: left,
+        );
+      }
+    });
+
+    final failure = error;
+    if (failure != null) throw GameActionException(failure);
+    final outcome = result;
+    if (outcome == null) throw const GameActionException('Attack failed.');
+    return outcome;
   }
 
   // ---------------------------------------------------------------------
