@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../config/game_rules.dart';
+
 /// A province's document under games/{gameId}/provinces/{provinceId}.
 /// The document id is the SVG province id ("US", "FR", ...). A province
 /// with no document is neutral.
@@ -40,10 +42,18 @@ class ProvinceState {
     );
   }
 
-  /// Text for the info panel.
+  bool get hasBuilding => buildingType != 'none' && buildingType.isNotEmpty;
+
+  /// Text for the info panel and the province window. The level is stored
+  /// but not shown for now.
   String get buildingLabel {
-    if (buildingType == 'none' || buildingType.isEmpty) return 'None';
-    final name = buildingType[0].toUpperCase() + buildingType.substring(1);
-    return buildingLevel > 0 ? '$name (level $buildingLevel)' : name;
+    if (!hasBuilding) return 'None';
+    return GameRules.buildingById(buildingType)?.name ??
+        _prettify(buildingType);
+  }
+
+  static String _prettify(String raw) {
+    final spaced = raw.replaceAll('_', ' ');
+    return spaced[0].toUpperCase() + spaced.substring(1);
   }
 }

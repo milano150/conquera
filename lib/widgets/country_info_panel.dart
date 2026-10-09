@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../theme/conquera_theme.dart';
 import 'player_tag.dart';
+import 'stat_block.dart';
 
 /// Full-width panel that sits directly under the top bar while a country
 /// is selected. Same surface and divider as the bar, so the two read as
-/// one header.
+/// one header. The "Manage" button on the right opens the province window.
 class CountryInfoPanel extends StatelessWidget {
   final String name;
 
@@ -15,6 +16,7 @@ class CountryInfoPanel extends StatelessWidget {
   final String power;
   final String building;
   final VoidCallback onClose;
+  final VoidCallback onOpenDetails;
 
   const CountryInfoPanel({
     super.key,
@@ -24,6 +26,7 @@ class CountryInfoPanel extends StatelessWidget {
     required this.power,
     required this.building,
     required this.onClose,
+    required this.onOpenDetails,
   });
 
   @override
@@ -64,29 +67,48 @@ class CountryInfoPanel extends StatelessWidget {
             ),
             const SizedBox(height: ConqueraSpace.xs),
             Padding(
-              padding: const EdgeInsets.only(right: ConqueraSpace.md),
-              child: Wrap(
-                spacing: ConqueraSpace.xl,
-                runSpacing: ConqueraSpace.md,
+              padding: const EdgeInsets.only(right: ConqueraSpace.sm),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _Stat(
-                    label: 'Owner',
-                    child: PlayerTag(
-                      name: ownerName ?? 'Unclaimed',
-                      color: ownerColor,
-                      style: ownerName == null
-                          ? ConqueraText.value
-                              .copyWith(color: ConqueraColors.muted)
-                          : ConqueraText.value,
+                  Expanded(
+                    child: Wrap(
+                      spacing: ConqueraSpace.xl,
+                      runSpacing: ConqueraSpace.md,
+                      children: [
+                        StatBlock(
+                          label: 'Owner',
+                          child: PlayerTag(
+                            name: ownerName ?? 'Unclaimed',
+                            color: ownerColor,
+                            style: ownerName == null
+                                ? ConqueraText.value
+                                    .copyWith(color: ConqueraColors.muted)
+                                : ConqueraText.value,
+                          ),
+                        ),
+                        StatBlock(
+                          label: 'Power',
+                          child: Text(power, style: ConqueraText.value),
+                        ),
+                        StatBlock(
+                          label: 'Building',
+                          child: Text(building, style: ConqueraText.value),
+                        ),
+                      ],
                     ),
                   ),
-                  _Stat(
-                    label: 'Power',
-                    child: Text(power, style: ConqueraText.value),
-                  ),
-                  _Stat(
-                    label: 'Building',
-                    child: Text(building, style: ConqueraText.value),
+                  const SizedBox(width: ConqueraSpace.sm),
+                  OutlinedButton(
+                    onPressed: onOpenDetails,
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Manage'),
+                        SizedBox(width: 6),
+                        Icon(Icons.arrow_forward, size: 16),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -94,26 +116,6 @@ class CountryInfoPanel extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  final String label;
-  final Widget child;
-
-  const _Stat({required this.label, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: ConqueraText.label),
-        const SizedBox(height: ConqueraSpace.xs),
-        child,
-      ],
     );
   }
 }

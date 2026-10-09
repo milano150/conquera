@@ -24,6 +24,9 @@ class ConqueraColors {
 
   // Gold is the one resource color.
   static const Color brass = Color(0xFFB8892B);
+
+  // Errors and "can't afford" hints.
+  static const Color danger = Color(0xFF9B2C2C);
 }
 
 /// Spacing scale (logical pixels).
@@ -97,6 +100,10 @@ ThemeData buildConqueraTheme() {
     scaffoldBackgroundColor: ConqueraColors.sea,
   );
 
+  final buttonShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(6),
+  );
+
   return base.copyWith(
     textTheme: GoogleFonts.barlowTextTheme(base.textTheme).apply(
       bodyColor: ConqueraColors.ink,
@@ -104,6 +111,35 @@ ThemeData buildConqueraTheme() {
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: ConqueraColors.accent,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: ConqueraColors.ink,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: ConqueraColors.divider.withAlpha(90),
+        disabledForegroundColor: ConqueraColors.muted,
+        minimumSize: const Size(0, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        shape: buttonShape,
+        textStyle: GoogleFonts.barlow(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: ConqueraColors.ink,
+        disabledForegroundColor: ConqueraColors.muted,
+        side: const BorderSide(color: ConqueraColors.ink),
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        shape: buttonShape,
+        textStyle: GoogleFonts.barlow(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     ),
   );
 }

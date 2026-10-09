@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/player_state.dart';
+import '../models/province.dart';
 import '../models/province_state.dart';
 import '../painters/map_painter.dart';
 import '../services/firestore_service.dart';
@@ -14,9 +15,11 @@ import '../state/map_controller.dart';
 import '../theme/conquera_theme.dart';
 import '../widgets/country_info_panel.dart';
 import '../widgets/player_top_bar.dart';
+import '../widgets/province_detail_dialog.dart';
 
 /// Pannable, zoomable world map. Tap a country to outline it and open its
-/// info panel; tap the ocean (or the close button) to clear.
+/// info panel; tap the ocean (or the close button) to clear. The panel's
+/// "Manage" button opens the province window (build / reinforce).
 ///
 /// Same approach as Urbanize: [InteractiveViewer] gives smooth pan/zoom,
 /// and a [Listener] (not a GestureDetector) does tap detection, because a
@@ -50,13 +53,16 @@ class _MapScreenState extends State<MapScreen> {
 
   Size? _fittedFor; // viewport size the initial fit was computed for
 
-  // Live game data.
+  // Live game data. Notifiers (instead of plain fields) so the province
+  // window can listen to the same data without opening its own streams.
   final FirestoreService _firestore = FirestoreService();
   late final String _uid = FirebaseAuth.instance.currentUser!.uid;
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
-  Map<String, ProvinceState> _provinceStates = const {};
-  Map<String, PlayerState> _players = const {};
+  final ValueNotifier<Map<String, ProvinceState>> _provinceStates =
+      ValueNotifier(const {});
+  final ValueNotifier<Map<String, PlayerState>> _players =
+      ValueNotifier(const {});
 
   /// How opaque an owner's color is over the land fill (0-255).
   static const int _ownerFillAlpha = 170;
@@ -69,17 +75,13 @@ class _MapScreenState extends State<MapScreen> {
     _provincesSub = _firestore
         .watchProvinces(gameId: FirestoreService.defaultGameId)
         .listen(
-      (states) {
-        if (mounted) setState(() => _provinceStates = states);
-      },
+      (states) => _provinceStates.value = states,
       onError: (Object e) => debugPrint('Provinces stream error: $e'),
     );
     _playersSub = _firestore
         .watchPlayers(gameId: FirestoreService.defaultGameId)
         .listen(
-      (players) {
-        if (mounted) setState(() => _players = players);
-      },
+      (players) => _players.value = players,
       onError: (Object e) => debugPrint('Players stream error: $e'),
     );
   }
@@ -88,6 +90,8 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     _provincesSub?.cancel();
     _playersSub?.cancel();
+    _provinceStates.dispose();
+    _players.dispose();
     _controller.dispose();
     _transform.dispose();
     super.dispose();
@@ -118,12 +122,29 @@ class _MapScreenState extends State<MapScreen> {
 
   /// provinceId -> owner's color, for the map's owner fills.
   Map<String, Color> _ownerFillColors() {
+    final players = _players.value;
     final colors = <String, Color>{};
-    _provinceStates.forEach((id, state) {
-      final owner = _players[state.ownerId];
+    _provinceStates.value.forEach((id, state) {
+      final owner = players[state.ownerId];
       if (owner != null) colors[id] = owner.color.withAlpha(_ownerFillAlpha);
     });
     return colors;
+  }
+
+  /// Opens the build / reinforce window for [province].
+  void _openDetails(Province province) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => ProvinceDetailDialog(
+        gameId: FirestoreService.defaultGameId,
+        uid: _uid,
+        provinceId: province.id,
+        provinceName: province.name,
+        provinceStates: _provinceStates,
+        players: _players,
+        firestore: _firestore,
+      ),
+    );
   }
 
   /// DEBUG ONLY: Space claims the selected country for the local player.
@@ -164,124 +185,125 @@ class _MapScreenState extends State<MapScreen> {
       autofocus: true,
       onKeyEvent: _onKey,
       child: Scaffold(
-      appBar: PlayerTopBar(
-        gameId: FirestoreService.defaultGameId,
-        uid: FirebaseAuth.instance.currentUser!.uid,
-      ),
-      body: ListenableBuilder(
-        listenable: _controller,
-        builder: (context, _) {
-          if (_controller.loadError != null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(ConqueraSpace.lg),
-                child: Text(
-                  'The map could not be loaded.\n${_controller.loadError}',
-                  textAlign: TextAlign.center,
-                  style: ConqueraText.value,
+        appBar: PlayerTopBar(
+          gameId: FirestoreService.defaultGameId,
+          uid: FirebaseAuth.instance.currentUser!.uid,
+        ),
+        body: ListenableBuilder(
+          listenable: Listenable.merge([_controller, _provinceStates, _players]),
+          builder: (context, _) {
+            if (_controller.loadError != null) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(ConqueraSpace.lg),
+                  child: Text(
+                    'The map could not be loaded.\n${_controller.loadError}',
+                    textAlign: TextAlign.center,
+                    style: ConqueraText.value,
+                  ),
                 ),
-              ),
-            );
-          }
-          if (!_controller.isLoaded) {
-            return const Center(child: CircularProgressIndicator());
-          }
+              );
+            }
+            if (!_controller.isLoaded) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final selected = _controller.selectedProvince;
-          final selectedState =
-              selected == null ? null : _provinceStates[selected.id];
-          final selectedOwner = _players[selectedState?.ownerId];
+            final selected = _controller.selectedProvince;
+            final selectedState =
+                selected == null ? null : _provinceStates.value[selected.id];
+            final selectedOwner = _players.value[selectedState?.ownerId];
 
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final viewport = constraints.biggest;
-                    if (_fittedFor != viewport) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) _fitToViewport(viewport);
-                      });
-                    }
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final viewport = constraints.biggest;
+                      if (_fittedFor != viewport) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _fitToViewport(viewport);
+                        });
+                      }
 
-                    // Urbanize's 0.5 floor, but never higher than the
-                    // fit-to-screen scale (so the initial view is valid).
-                    final minScale = min(_minScale, _fitScaleFor(viewport));
+                      // Urbanize's 0.5 floor, but never higher than the
+                      // fit-to-screen scale (so the initial view is valid).
+                      final minScale = min(_minScale, _fitScaleFor(viewport));
 
-                    return InteractiveViewer(
-                      transformationController: _transform,
-                      constrained: false,
-                      minScale: minScale,
-                      maxScale: _maxScale,
-                      boundaryMargin: const EdgeInsets.all(_boundaryMargin),
-                      child: Listener(
-                        behavior: HitTestBehavior.opaque,
-                        onPointerDown: _onPointerDown,
-                        onPointerUp: _onPointerUp,
-                        child: SizedBox(
-                          width: _controller.mapSize.width,
-                          height: _controller.mapSize.height,
-                          child: Stack(
-                            children: [
-                              RepaintBoundary(
-                                child: CustomPaint(
-                                  size: _controller.mapSize,
-                                  painter: MapPainter(
-                                    provinces: _controller.provinces,
-                                    ownerFillColors: _ownerFillColors(),
+                      return InteractiveViewer(
+                        transformationController: _transform,
+                        constrained: false,
+                        minScale: minScale,
+                        maxScale: _maxScale,
+                        boundaryMargin: const EdgeInsets.all(_boundaryMargin),
+                        child: Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: _onPointerDown,
+                          onPointerUp: _onPointerUp,
+                          child: SizedBox(
+                            width: _controller.mapSize.width,
+                            height: _controller.mapSize.height,
+                            child: Stack(
+                              children: [
+                                RepaintBoundary(
+                                  child: CustomPaint(
+                                    size: _controller.mapSize,
+                                    painter: MapPainter(
+                                      provinces: _controller.provinces,
+                                      ownerFillColors: _ownerFillColors(),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              IgnorePointer(
-                                child: RepaintBoundary(
-                                  child: AnimatedBuilder(
-                                    animation: _transform,
-                                    builder: (context, _) => CustomPaint(
-                                      size: _controller.mapSize,
-                                      painter: SelectionPainter(
-                                        path: selected?.path,
-                                        scale: _transform.value
-                                            .getMaxScaleOnAxis(),
+                                IgnorePointer(
+                                  child: RepaintBoundary(
+                                    child: AnimatedBuilder(
+                                      animation: _transform,
+                                      builder: (context, _) => CustomPaint(
+                                        size: _controller.mapSize,
+                                        painter: SelectionPainter(
+                                          path: selected?.path,
+                                          scale: _transform.value
+                                              .getMaxScaleOnAxis(),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  alignment: Alignment.topCenter,
-                  child: selected == null
-                      ? const SizedBox(width: double.infinity)
-                      : CountryInfoPanel(
-                          name: selected.name,
-                          ownerName: selectedOwner?.displayName ??
-                              (selectedState?.ownerId != null
-                                  ? 'Unknown player'
-                                  : null),
-                          ownerColor: selectedOwner?.color,
-                          power: '${(selectedState?.troops ?? 0).floor()}',
-                          building: selectedState?.buildingLabel ?? 'None',
-                          onClose: _controller.clearSelection,
-                        ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
+                    alignment: Alignment.topCenter,
+                    child: selected == null
+                        ? const SizedBox(width: double.infinity)
+                        : CountryInfoPanel(
+                            name: selected.name,
+                            ownerName: selectedOwner?.displayName ??
+                                (selectedState?.ownerId != null
+                                    ? 'Unknown player'
+                                    : null),
+                            ownerColor: selectedOwner?.color,
+                            power: '${(selectedState?.troops ?? 0).floor()}',
+                            building: selectedState?.buildingLabel ?? 'None',
+                            onClose: _controller.clearSelection,
+                            onOpenDetails: () => _openDetails(selected),
+                          ),
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
-      ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
