@@ -17,15 +17,29 @@ class BuildingDef {
   /// Extra gold per second for the owner.
   final double goldPerSec;
 
+  /// Extra defence: 0.5 makes the province 50% harder to invade.
+  final double defenseBonus;
+
+  /// The province sends its power to attacks launched by bordering
+  /// provinces of the same owner (a barracks).
+  final bool supportsAttacks;
+
+  /// Short description shown in the province window. Null = the gold text.
+  final String? effect;
+
   const BuildingDef({
     required this.id,
     required this.name,
     required this.icon,
     required this.cost,
-    required this.goldPerSec,
+    this.goldPerSec = 0,
+    this.defenseBonus = 0,
+    this.supportsAttacks = false,
+    this.effect,
   });
 
   String get effectLabel =>
+      effect ??
       'increases gold production by +${_trim(goldPerSec * 60)} gold/min';
 }
 
@@ -54,6 +68,10 @@ class UnitDef {
 class GameRules {
   const GameRules._();
 
+  /// Gold price of claiming a bordering unclaimed province. Claiming counts
+  /// as an attack, so it starts the attack cooldown too.
+  static const int claimCost = 500;
+
   /// How long a player must wait between attacks (win or lose).
   static const Duration attackCooldown = Duration(minutes: 1);
 
@@ -72,7 +90,38 @@ class GameRules {
     goldPerSec: 0.02,
   );
 
-  static const List<BuildingDef> buildings = [goldMine];
+  static const BuildingDef fortress = BuildingDef(
+    id: 'fortress',
+    name: 'Fortress',
+    icon: Icons.fort,
+    cost: 60,
+    defenseBonus: 0.5,
+    effect: 'makes this province 50% harder to invade',
+  );
+
+  static const BuildingDef barracks = BuildingDef(
+    id: 'barracks',
+    name: 'Barracks',
+    icon: Icons.military_tech,
+    cost: 50,
+    supportsAttacks: true,
+    effect: 'sends its power to attacks by bordering provinces',
+  );
+
+  static const List<BuildingDef> buildings = [goldMine, fortress, barracks];
+
+  /// After destroying a building, a player must wait this long before
+  /// building anything again.
+  static const Duration buildCooldownAfterDestroy = Duration(minutes: 1);
+
+  /// How much stronger a province is when invaded: 1.5 with a fortress,
+  /// 1.0 otherwise.
+  static double defenseMultiplier(String buildingType) =>
+      1 + (buildingById(buildingType)?.defenseBonus ?? 0);
+
+  /// True for a building (barracks) that joins bordering provinces' attacks.
+  static bool supportsAttacks(String buildingType) =>
+      buildingById(buildingType)?.supportsAttacks ?? false;
 
   static const List<UnitDef> units = [
     UnitDef(id: 'squad', name: 'Squad', power: 5, cost: 10),

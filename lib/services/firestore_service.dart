@@ -240,6 +240,11 @@ class FirestoreService {
       }
 
       final now = DateTime.now();
+      final buildReadyAt = PlayerState.fromDoc(playerSnap).buildReadyAt;
+      if (buildReadyAt != null && now.isBefore(buildReadyAt)) {
+        final secs = (buildReadyAt.difference(now).inMilliseconds / 1000).ceil();
+        return 'You can build again in $secs s.';
+      }
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
       if (gold < building.cost) return 'Not enough gold.';
 
@@ -293,15 +298,17 @@ class FirestoreService {
       tx.update(provinceRef, {
         'building': {'type': 'none', 'level': 0},
       });
-      tx.update(
-        playerRef,
-        _settledIncomeUpdate(
+      final now = DateTime.now();
+      tx.update(playerRef, {
+        ..._settledIncomeUpdate(
           playerSnap,
           owned: _ownedCount(playerSnap),
           mines: _mineCount(playerSnap) - (removesMine ? 1 : 0),
-          now: DateTime.now(),
+          now: now,
         ),
-      );
+        // Starts the "can't build yet" cooldown.
+        'lastDestroyAt': Timestamp.fromDate(now),
+      });
       return null;
     });
 
@@ -350,19 +357,23 @@ class FirestoreService {
     if (error != null) throw GameActionException(error);
   }
 
-  /// [uid] attacks [targetId] with every province they own among
-  /// [neighborIds] (the target's bordering provinces, worked out from the
-  /// map geometry by the caller).
+  /// [uid] attacks [targetId].
   ///
-  /// Attacker power X = the troops of those provinces added together;
-  /// defender power Y = the target's troops. Each side gets a small random
-  /// luck multiplier (see [GameRules.attackLuck]); the higher one wins, a
-  /// tie goes to the defender.
+  /// Who fights: every province [uid] owns among [neighborIds] (the target's
+  /// bordering provinces), plus every barracks province [uid] owns that
+  /// borders one of those. [supportLinks] maps each candidate barracks
+  /// province to the provinces it borders (worked out from the map geometry
+  /// by the caller); the transaction re-checks ownership and the building.
   ///
-  /// Win: X is spread evenly over the attacking provinces and the annexed
+  /// Attacker power X = the troops of everyone fighting added together;
+  /// defender power Y = the target's troops, times 1.5 if it has a fortress.
+  /// Each side gets a random luck multiplier (see [GameRules.attackLuck]);
+  /// the higher one wins, a tie goes to the defender.
+  ///
+  /// Win: X is spread evenly over everyone who fought and the annexed
   /// province, which changes hands (building included).
-  /// Loss: the attacking provinces lose all their power, and the defender
-  /// loses the same amount (down to 0).
+  /// Loss: everyone who fought loses all their power, and the defender loses
+  /// the same amount (down to 0).
   /// Either way the attacker's cooldown starts.
   ///
   /// Throws [GameActionException] if the attack isn't allowed.
@@ -374,13 +385,21 @@ class FirestoreService {
     required String uid,
     required String targetId,
     required Iterable<String> neighborIds,
+    Map<String, Set<String>> supportLinks = const {},
     Random? random,
   }) async {
     final targetRef = _provincesRef(gameId).doc(targetId);
     final attackerRef = _playerRef(gameId, uid);
+    final borderIds = neighborIds.toSet()..remove(targetId);
     final borderRefs = [
-      for (final id in neighborIds.toSet())
-        if (id != targetId) _provincesRef(gameId).doc(id),
+      for (final id in borderIds) _provincesRef(gameId).doc(id),
+    ];
+    final supportIds = [
+      for (final id in supportLinks.keys)
+        if (id != targetId && !borderIds.contains(id)) id,
+    ];
+    final supportRefs = [
+      for (final id in supportIds) _provincesRef(gameId).doc(id),
     ];
     final rng = random ?? Random();
 
@@ -397,6 +416,10 @@ class FirestoreService {
       final borderSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
       for (final ref in borderRefs) {
         borderSnaps.add(await tx.get(ref));
+      }
+      final supportSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in supportRefs) {
+        supportSnaps.add(await tx.get(ref));
       }
 
       final targetData = targetSnap.data();
@@ -429,24 +452,41 @@ class FirestoreService {
         return;
       }
 
-      final attackers = [
+      final bordering = [
         for (final snap in borderSnaps)
           if (snap.exists && snap.data()?['ownerId'] == uid) snap,
       ];
-      if (attackers.isEmpty) {
+      if (bordering.isEmpty) {
         error = 'None of your provinces border this one.';
         return;
       }
 
+      // Barracks that border a fighting province send their power too.
+      final borderingIds = {for (final snap in bordering) snap.id};
+      final supporters = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (var i = 0; i < supportSnaps.length; i++) {
+        final snap = supportSnaps[i];
+        final data = snap.data();
+        if (!snap.exists || data?['ownerId'] != uid) continue;
+        if (!GameRules.supportsAttacks(_buildingTypeOf(data))) continue;
+        final links = supportLinks[supportIds[i]] ?? const <String>{};
+        if (links.any(borderingIds.contains)) supporters.add(snap);
+      }
+      final fighters = [...bordering, ...supporters];
+
       var attackerPower = 0.0;
-      for (final snap in attackers) {
+      for (final snap in fighters) {
         attackerPower += (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
       }
       if (attackerPower <= 0) {
-        error = 'Your bordering provinces have no power to attack with.';
+        error = 'Your provinces taking part have no power to attack with.';
         return;
       }
-      final defenderPower = (targetData?['troops'] as num?)?.toDouble() ?? 0;
+
+      final defenseMultiplier =
+          GameRules.defenseMultiplier(_buildingTypeOf(targetData));
+      final defenderRaw = (targetData?['troops'] as num?)?.toDouble() ?? 0;
+      final defenderPower = defenderRaw * defenseMultiplier;
 
       double luck() => 1 + (rng.nextDouble() * 2 - 1) * GameRules.attackLuck;
       final attackerStrength = attackerPower * luck();
@@ -457,9 +497,9 @@ class FirestoreService {
       final stamp = FieldValue.serverTimestamp();
 
       if (won) {
-        // Normalize: X is shared evenly between the attackers and Y.
-        final share = attackerPower / (attackers.length + 1);
-        for (final snap in attackers) {
+        // Normalize: X is shared evenly between the fighters and Y.
+        final share = attackerPower / (fighters.length + 1);
+        for (final snap in fighters) {
           tx.update(snap.reference, {'troops': share, 'troopsUpdatedAt': stamp});
         }
 
@@ -496,13 +536,16 @@ class FirestoreService {
           defenderPower: defenderPower,
           attackerStrength: attackerStrength,
           defenderStrength: defenderStrength,
-          attackerProvinceCount: attackers.length,
+          attackerProvinceCount: fighters.length,
           powerAfter: share,
           defenderPowerLeft: 0,
         );
       } else {
-        final left = max(0.0, defenderPower - attackerPower);
-        for (final snap in attackers) {
+        // The defender's lost power is taken off its boosted power, then
+        // converted back (so a fortress doesn't inflate what is left).
+        final left =
+            max(0.0, defenderPower - attackerPower) / defenseMultiplier;
+        for (final snap in fighters) {
           tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
         }
         tx.update(targetRef, {'troops': left, 'troopsUpdatedAt': stamp});
@@ -514,7 +557,7 @@ class FirestoreService {
           defenderPower: defenderPower,
           attackerStrength: attackerStrength,
           defenderStrength: defenderStrength,
-          attackerProvinceCount: attackers.length,
+          attackerProvinceCount: fighters.length,
           powerAfter: 0,
           defenderPowerLeft: left,
         );
@@ -526,6 +569,80 @@ class FirestoreService {
     final outcome = result;
     if (outcome == null) throw const GameActionException('Attack failed.');
     return outcome;
+  }
+
+  /// Buys a bordering unclaimed province for [GameRules.claimCost] gold.
+  /// [neighborIds] are the province's bordering provinces (from the map
+  /// geometry plus sea links); at least one must belong to [uid]. Counts as
+  /// an attack: the attack cooldown starts. Throws [GameActionException] if
+  /// it isn't allowed.
+  ///
+  /// NOTE: runs on the client for now, like the other actions.
+  Future<void> claimUnclaimedProvince({
+    required String gameId,
+    required String uid,
+    required String provinceId,
+    required Iterable<String> neighborIds,
+  }) async {
+    final provinceRef = _provincesRef(gameId).doc(provinceId);
+    final playerRef = _playerRef(gameId, uid);
+    final borderRefs = [
+      for (final id in neighborIds.toSet())
+        if (id != provinceId) _provincesRef(gameId).doc(id),
+    ];
+
+    final error = await _db.runTransaction<String?>((tx) async {
+      final provinceSnap = await tx.get(provinceRef);
+      final playerSnap = await tx.get(playerRef);
+      final borderSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in borderRefs) {
+        borderSnaps.add(await tx.get(ref));
+      }
+
+      final data = provinceSnap.data();
+      if (!playerSnap.exists) return 'Player not found.';
+      if (data?['ownerId'] != null) return 'This province is already owned.';
+
+      final now = DateTime.now();
+      final player = PlayerState.fromDoc(playerSnap);
+      final readyAt = player.attackReadyAt;
+      if (readyAt != null && now.isBefore(readyAt)) {
+        final secs = (readyAt.difference(now).inMilliseconds / 1000).ceil();
+        return 'Your troops are still recovering ($secs s left).';
+      }
+
+      final bordersMine = borderSnaps.any(
+        (snap) => snap.exists && snap.data()?['ownerId'] == uid,
+      );
+      if (!bordersMine) return 'None of your provinces border this one.';
+
+      final cost = GameRules.claimCost;
+      if (player.goldAt(now) < cost) return 'Not enough gold.';
+
+      if (provinceSnap.exists) {
+        tx.update(provinceRef, {'ownerId': uid});
+      } else {
+        tx.set(provinceRef, {
+          'ownerId': uid,
+          'troops': 0,
+          'troopsUpdatedAt': FieldValue.serverTimestamp(),
+          'building': {'type': 'none', 'level': 0},
+        });
+      }
+      tx.update(playerRef, {
+        ..._settledIncomeUpdate(
+          playerSnap,
+          owned: _ownedCount(playerSnap) + 1,
+          mines: _mineCount(playerSnap) + (_hasGoldMine(data) ? 1 : 0),
+          now: now,
+          spend: cost.toDouble(),
+        ),
+        'lastAttackAt': Timestamp.fromDate(now),
+      });
+      return null;
+    });
+
+    if (error != null) throw GameActionException(error);
   }
 
   // ---------------------------------------------------------------------

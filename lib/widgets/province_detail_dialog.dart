@@ -72,6 +72,18 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     super.dispose();
   }
 
+  /// Time left until [readyAt] (zero if null or already past).
+  Duration _remaining(DateTime? readyAt) {
+    if (readyAt == null) return Duration.zero;
+    final left = readyAt.difference(DateTime.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  String _clock(Duration d) {
+    final secs = (d.inMilliseconds / 1000).ceil();
+    return '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
+  }
+
   Future<void> _run(Future<void> Function() action, String success) async {
     if (_busy) return;
     setState(() {
@@ -270,7 +282,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             const SizedBox(height: ConqueraSpace.lg),
             const _SectionTitle('Build'),
             const SizedBox(height: ConqueraSpace.sm),
-            ..._buildSection(province: province, gold: gold),
+            ..._buildSection(
+              province: province,
+              gold: gold,
+              buildReadyAt: players[widget.uid]?.buildReadyAt,
+            ),
             const SizedBox(height: ConqueraSpace.lg),
             const Divider(height: 1, color: ConqueraColors.divider),
             const SizedBox(height: ConqueraSpace.lg),
@@ -301,6 +317,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   List<Widget> _buildSection({
     required ProvinceState? province,
     required double gold,
+    required DateTime? buildReadyAt,
   }) {
     if (province != null && province.hasBuilding) {
       final def = GameRules.buildingById(province.buildingType);
@@ -341,7 +358,10 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
 
     final pending = _pendingBuilding;
     final unaffordable = pending != null && gold < pending.cost;
-    final canBuild = pending != null && !unaffordable && !_busy;
+    // After destroying a building the player must wait before building.
+    final cooldownLeft = _remaining(buildReadyAt);
+    final cooling = cooldownLeft > Duration.zero;
+    final canBuild = pending != null && !unaffordable && !_busy && !cooling;
 
     return [
       Row(
@@ -366,12 +386,12 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                 const SizedBox(height: ConqueraSpace.sm),
                 _ActionRow(
                   info: pending == null
-                      ? ''
+                      ? (cooling ? 'Cooling down after destroying a building' : '')
                       : '${pending.cost} gold  ·  ${pending.effectLabel}',
                   unaffordable: unaffordable,
                   button: FilledButton(
                     onPressed: canBuild ? _build : null,
-                    child: const Text('Build'),
+                    child: Text(cooling ? 'Build ${_clock(cooldownLeft)}' : 'Build'),
                   ),
                 ),
               ],

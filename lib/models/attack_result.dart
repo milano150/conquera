@@ -2,8 +2,9 @@
 class AttackResult {
   final bool won;
 
-  /// Real power on each side before luck: all of the attacker's bordering
-  /// provinces added together vs. the defending province.
+  /// Power on each side before luck: everyone fighting for the attacker
+  /// added together vs. the defending province (already boosted by a
+  /// fortress, if it has one).
   final double attackerPower;
   final double defenderPower;
 
@@ -12,7 +13,8 @@ class AttackResult {
   final double attackerStrength;
   final double defenderStrength;
 
-  /// How many of the attacker's provinces took part.
+  /// How many of the attacker's provinces took part (bordering ones plus
+  /// barracks support).
   final int attackerProvinceCount;
 
   /// Win: power each of the attacker's provinces (and the annexed one)

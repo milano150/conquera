@@ -220,6 +220,77 @@ class _MapScreenState extends State<MapScreen> {
     };
   }
 
+  /// Buys the unclaimed [target] (it must border one of the player's
+  /// provinces). Asks first, then reports the outcome in a snackbar.
+  Future<void> _claim(Province target) async {
+    final cost = GameRules.claimCost;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: ConqueraColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: ConqueraColors.divider),
+        ),
+        title: Text('Claim ${target.name}?', style: ConqueraText.name),
+        content: Text(
+          'It costs $cost gold and starts your attack cooldown.',
+          style: ConqueraText.value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Claim for $cost'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _firestore.claimUnclaimedProvince(
+        gameId: FirestoreService.defaultGameId,
+        uid: _uid,
+        provinceId: target.id,
+        neighborIds: _controller.neighborsOf(target.id),
+      );
+      messenger.showSnackBar(SnackBar(content: Text('${target.name} claimed.')));
+    } on GameActionException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      debugPrint('Claim failed: $e');
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Something went wrong. Try again.')),
+      );
+    }
+  }
+
+  /// Barracks the player owns that could join an attack on [target]:
+  /// candidate province id -> the player's bordering provinces it touches.
+  /// (The battle re-checks this on the server side of the transaction.)
+  Map<String, Set<String>> _supportLinks(Province target) {
+    final states = _provinceStates.value;
+    final border = _controller.neighborsOf(target.id);
+    final links = <String, Set<String>>{};
+    for (final b in border) {
+      if (states[b]?.ownerId != _uid) continue;
+      for (final m in _controller.neighborsOf(b)) {
+        if (m == target.id || border.contains(m)) continue;
+        final state = states[m];
+        if (state == null || state.ownerId != _uid) continue;
+        if (!GameRules.supportsAttacks(state.buildingType)) continue;
+        (links[m] ??= <String>{}).add(b);
+      }
+    }
+    return links;
+  }
+
   /// Opens the battle window against [target].
   void _openAttack(Province target) {
     showDialog<void>(
@@ -231,6 +302,7 @@ class _MapScreenState extends State<MapScreen> {
         targetId: target.id,
         targetName: target.name,
         neighborIds: _controller.neighborsOf(target.id),
+        supportLinks: _supportLinks(target),
         provinceNames: {
           for (final p in _controller.provinces) p.id: p.name,
         },
@@ -329,8 +401,12 @@ class _MapScreenState extends State<MapScreen> {
             final isEnemy = selected != null &&
                 selectedOwnerId != null &&
                 selectedOwnerId != _uid;
-            final canAttack =
-                selected != null && isEnemy && _myBorderingIds(selected).isNotEmpty;
+            final isUnclaimed = selected != null && selectedOwnerId == null;
+
+            // Attacking and claiming both need a bordering province of ours.
+            final canAttack = selected != null &&
+                (isEnemy || isUnclaimed) &&
+                _myBorderingIds(selected).isNotEmpty;
             final attackReadyAt = _players.value[_uid]?.attackReadyAt;
 
             return Stack(
@@ -434,9 +510,11 @@ class _MapScreenState extends State<MapScreen> {
                             onClose: _controller.clearSelection,
                             onOpenDetails: () => _openDetails(selected),
                             isEnemy: isEnemy,
+                            isUnclaimed: isUnclaimed,
                             canAttack: canAttack,
                             attackReadyAt: attackReadyAt,
                             onAttack: () => _openAttack(selected),
+                            onClaim: () => _claim(selected),
                           ),
                   ),
                 ),

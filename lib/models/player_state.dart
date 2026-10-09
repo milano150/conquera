@@ -20,6 +20,9 @@ class PlayerState {
   /// When this player last attacked (null = never). Drives the cooldown.
   final DateTime? lastAttackAt;
 
+  /// When this player last destroyed a building (null = never).
+  final DateTime? lastDestroyAt;
+
   const PlayerState({
     required this.uid,
     required this.displayName,
@@ -28,12 +31,14 @@ class PlayerState {
     required this.goldRate,
     required this.goldUpdatedAt,
     this.lastAttackAt,
+    this.lastDestroyAt,
   });
 
   factory PlayerState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     final updated = data['goldUpdatedAt'];
     final lastAttack = data['lastAttackAt'];
+    final lastDestroy = data['lastDestroyAt'];
     return PlayerState(
       uid: doc.id,
       displayName: (data['displayName'] as String?) ?? 'Player',
@@ -43,11 +48,16 @@ class PlayerState {
       // Null while a server timestamp is still pending right after a write.
       goldUpdatedAt: updated is Timestamp ? updated.toDate() : null,
       lastAttackAt: lastAttack is Timestamp ? lastAttack.toDate() : null,
+      lastDestroyAt: lastDestroy is Timestamp ? lastDestroy.toDate() : null,
     );
   }
 
   /// When the player may attack again (null = right now).
   DateTime? get attackReadyAt => lastAttackAt?.add(GameRules.attackCooldown);
+
+  /// When the player may build again (null = right now).
+  DateTime? get buildReadyAt =>
+      lastDestroyAt?.add(GameRules.buildCooldownAfterDestroy);
 
   /// "#RRGGBB" -> Color (opaque).
   Color get color {

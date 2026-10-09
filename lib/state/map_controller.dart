@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
 import '../models/province.dart';
+import '../config/sea_links.dart';
 import '../services/border_finder.dart';
 import '../services/svg_map_parser.dart';
 
@@ -40,7 +41,22 @@ class MapController extends ChangeNotifier {
       _provinces = result.provinces;
       _provinceLookup = {for (final p in _provinces) p.id: p};
       _mapSize = result.size;
-      _neighbors = BorderFinder.find(_provinces, _mapSize);
+      final neighbors = <String, Set<String>>{
+        for (final e in BorderFinder.find(_provinces, _mapSize).entries)
+          e.key: {...e.value},
+      };
+      for (final link in seaLinks) {
+        final a = link.$1;
+        final b = link.$2;
+        if (!_provinceLookup.containsKey(a) ||
+            !_provinceLookup.containsKey(b)) {
+          debugPrint('Sea link skipped (not on the map): $a - $b');
+          continue;
+        }
+        (neighbors[a] ??= <String>{}).add(b);
+        (neighbors[b] ??= <String>{}).add(a);
+      }
+      _neighbors = neighbors;
       _isLoaded = true;
       _loadError = null;
     } catch (error, stackTrace) {

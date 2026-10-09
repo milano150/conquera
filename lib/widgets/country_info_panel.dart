@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../config/game_rules.dart';
 import '../theme/conquera_theme.dart';
 import 'player_tag.dart';
 import 'stat_block.dart';
@@ -9,7 +10,8 @@ import 'stat_block.dart';
 /// Full-width panel that sits directly under the top bar while a country
 /// is selected. Same surface and divider as the bar, so the two read as
 /// one header. The button on the right is "Manage" (opens the province
-/// window), or a red "Attack" when the country belongs to another player.
+/// window), a red "Attack" when the country belongs to another player, or
+/// a "Claim" when nobody owns it yet.
 class CountryInfoPanel extends StatelessWidget {
   final String name;
 
@@ -24,12 +26,17 @@ class CountryInfoPanel extends StatelessWidget {
   /// The country belongs to another player: show Attack instead of Manage.
   final bool isEnemy;
 
-  /// One of the player's provinces borders this country.
+  /// Nobody owns the country: show Claim instead of Manage.
+  final bool isUnclaimed;
+
+  /// One of the player's provinces borders this country (needed to attack
+  /// or claim it).
   final bool canAttack;
 
   /// When the attack cooldown ends (null or past = ready).
   final DateTime? attackReadyAt;
   final VoidCallback? onAttack;
+  final VoidCallback? onClaim;
 
   const CountryInfoPanel({
     super.key,
@@ -41,9 +48,11 @@ class CountryInfoPanel extends StatelessWidget {
     required this.onClose,
     required this.onOpenDetails,
     this.isEnemy = false,
+    this.isUnclaimed = false,
     this.canAttack = false,
     this.attackReadyAt,
     this.onAttack,
+    this.onClaim,
   });
 
   @override
@@ -117,10 +126,26 @@ class CountryInfoPanel extends StatelessWidget {
                   ),
                   const SizedBox(width: ConqueraSpace.sm),
                   if (isEnemy)
-                    _AttackButton(
+                    _ActionButton(
+                      label: 'Attack',
+                      icon: Icons.bolt,
+                      color: ConqueraColors.danger,
                       enabled: canAttack,
                       readyAt: attackReadyAt,
+                      hint: canAttack ? null : 'Not bordering your land',
                       onPressed: onAttack,
+                    )
+                  else if (isUnclaimed)
+                    _ActionButton(
+                      label: 'Claim',
+                      icon: Icons.flag,
+                      color: ConqueraColors.accent,
+                      enabled: canAttack,
+                      readyAt: attackReadyAt,
+                      hint: canAttack
+                          ? 'Costs ${GameRules.claimCost} gold'
+                          : 'Not bordering your land',
+                      onPressed: onClaim,
                     )
                   else
                     OutlinedButton(
@@ -144,25 +169,34 @@ class CountryInfoPanel extends StatelessWidget {
   }
 }
 
-/// The red Attack button. Disabled when none of the player's provinces
-/// border the country; while the cooldown runs it shows a countdown and
-/// ticks once a second on its own (so the panel doesn't rebuild).
-class _AttackButton extends StatefulWidget {
+/// The panel's action button (red Attack, blue Claim). Disabled when none
+/// of the player's provinces border the country; while the attack cooldown
+/// runs it shows a countdown and ticks once a second on its own (so the
+/// panel doesn't rebuild). [hint] is a small caption under the button.
+class _ActionButton extends StatefulWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
   final bool enabled;
   final DateTime? readyAt;
+  final String? hint;
   final VoidCallback? onPressed;
 
-  const _AttackButton({
+  const _ActionButton({
+    required this.label,
+    required this.icon,
+    required this.color,
     required this.enabled,
     required this.readyAt,
+    required this.hint,
     required this.onPressed,
   });
 
   @override
-  State<_AttackButton> createState() => _AttackButtonState();
+  State<_ActionButton> createState() => _ActionButtonState();
 }
 
-class _AttackButtonState extends State<_AttackButton> {
+class _ActionButtonState extends State<_ActionButton> {
   Timer? _ticker;
 
   @override
@@ -172,7 +206,7 @@ class _AttackButtonState extends State<_AttackButton> {
   }
 
   @override
-  void didUpdateWidget(covariant _AttackButton oldWidget) {
+  void didUpdateWidget(covariant _ActionButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.readyAt != widget.readyAt) _syncTicker();
   }
@@ -210,6 +244,7 @@ class _AttackButtonState extends State<_AttackButton> {
   Widget build(BuildContext context) {
     final left = _left();
     final cooling = left > Duration.zero;
+    final hint = widget.hint;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -218,7 +253,7 @@ class _AttackButtonState extends State<_AttackButton> {
         FilledButton(
           onPressed: widget.enabled && !cooling ? widget.onPressed : null,
           style: FilledButton.styleFrom(
-            backgroundColor: ConqueraColors.danger,
+            backgroundColor: widget.color,
             foregroundColor: Colors.white,
             disabledBackgroundColor: ConqueraColors.divider.withAlpha(90),
             disabledForegroundColor: ConqueraColors.muted,
@@ -228,15 +263,15 @@ class _AttackButtonState extends State<_AttackButton> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(cooling ? 'Attack ${_clock(left)}' : 'Attack'),
+              Text(cooling ? '${widget.label} ${_clock(left)}' : widget.label),
               const SizedBox(width: 6),
-              const Icon(Icons.bolt, size: 16),
+              Icon(widget.icon, size: 16),
             ],
           ),
         ),
-        if (!widget.enabled) ...[
+        if (hint != null) ...[
           const SizedBox(height: ConqueraSpace.xs),
-          Text('Not bordering your land', style: ConqueraText.label),
+          Text(hint, style: ConqueraText.label),
         ],
       ],
     );

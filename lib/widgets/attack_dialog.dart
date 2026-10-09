@@ -13,8 +13,9 @@ import 'player_tag.dart';
 
 /// The battle window, in three steps:
 ///   1. Preview: X vs Y (X is every province the player owns that borders
-///      the target, Y is the target) and the player's chance to win. Nothing
-///      has happened yet; the player can cancel or confirm.
+///      the target, plus barracks that border one of those; Y is the target,
+///      boosted if it has a fortress) and the player's chance to win.
+///      Nothing has happened yet; the player can cancel or confirm.
 ///   2. Fight: after Confirm, a short animation while the attack resolves.
 ///   3. Result: Victory or Defeat.
 ///
@@ -30,6 +31,10 @@ class AttackDialog extends StatefulWidget {
   /// Every province that borders the target (not only the player's).
   final Set<String> neighborIds;
 
+  /// Barracks the player owns that may join the attack: candidate province
+  /// id -> the player's bordering provinces it touches.
+  final Map<String, Set<String>> supportLinks;
+
   /// provinceId -> display name, to list the player's attacking provinces.
   final Map<String, String> provinceNames;
   final ValueListenable<Map<String, ProvinceState>> provinceStates;
@@ -43,6 +48,7 @@ class AttackDialog extends StatefulWidget {
     required this.targetId,
     required this.targetName,
     required this.neighborIds,
+    required this.supportLinks,
     required this.provinceNames,
     required this.provinceStates,
     required this.players,
@@ -51,6 +57,15 @@ class AttackDialog extends StatefulWidget {
 
   @override
   State<AttackDialog> createState() => _AttackDialogState();
+}
+
+/// One line under a side's power figure: text with an optional small icon
+/// (a barracks supporting the attack, a fortress defending).
+class _Line {
+  final String text;
+  final IconData? icon;
+
+  const _Line(this.text, {this.icon});
 }
 
 class _AttackDialogState extends State<AttackDialog>
@@ -62,8 +77,9 @@ class _AttackDialogState extends State<AttackDialog>
   late final AnimationController _pulse;
 
   late final double _attackPower;
-  late final List<({String name, int power})> _involved;
+  late final List<_Line> _involved;
   late final double _defendPower;
+  late final List<_Line> _defenderLines;
   late final PlayerState? _me;
   late final PlayerState? _defender;
   late final double _winChance;
@@ -86,23 +102,58 @@ class _AttackDialogState extends State<AttackDialog>
     final states = widget.provinceStates.value;
     final players = widget.players.value;
 
+    // Fighters: the player's bordering provinces, then barracks that border
+    // one of them (they send their power even though they don't touch the
+    // target).
     var power = 0.0;
-    final involved = <({String name, int power})>[];
+    final direct = <({String text, int power})>[];
+    final ownedBorders = <String>{};
     for (final id in widget.neighborIds) {
       final state = states[id];
       if (state != null && state.ownerId == widget.uid) {
+        ownedBorders.add(id);
         power += state.troops;
-        involved.add((
-          name: widget.provinceNames[id] ?? id,
+        direct.add((
+          text: '${widget.provinceNames[id] ?? id}  ${state.troops.floor()}',
           power: state.troops.floor(),
         ));
       }
     }
-    involved.sort((a, b) => b.power.compareTo(a.power));
+    final support = <({String text, int power, IconData? icon})>[];
+    widget.supportLinks.forEach((id, links) {
+      if (widget.neighborIds.contains(id)) return;
+      final state = states[id];
+      if (state == null || state.ownerId != widget.uid) return;
+      if (!GameRules.supportsAttacks(state.buildingType)) return;
+      if (!links.any(ownedBorders.contains)) return;
+      power += state.troops;
+      support.add((
+        text: '${widget.provinceNames[id] ?? id}  ${state.troops.floor()}',
+        power: state.troops.floor(),
+        icon: GameRules.buildingById(state.buildingType)?.icon,
+      ));
+    });
+    direct.sort((a, b) => b.power.compareTo(a.power));
+    support.sort((a, b) => b.power.compareTo(a.power));
+    _involved = [
+      for (final d in direct) _Line(d.text),
+      for (final s in support) _Line(s.text, icon: s.icon),
+    ];
+
     final target = states[widget.targetId];
+    final targetBuilding = target?.buildingType ?? 'none';
+    final defenseMultiplier = GameRules.defenseMultiplier(targetBuilding);
+    final defenseDef = GameRules.buildingById(targetBuilding);
     _attackPower = power;
-    _involved = involved;
-    _defendPower = target?.troops ?? 0;
+    _defendPower = (target?.troops ?? 0) * defenseMultiplier;
+    _defenderLines = [
+      _Line(widget.targetName),
+      if (defenseMultiplier > 1 && defenseDef != null)
+        _Line(
+          '${defenseDef.name} +${((defenseMultiplier - 1) * 100).round()}%',
+          icon: defenseDef.icon,
+        ),
+    ];
     _me = players[widget.uid];
     _defender = players[target?.ownerId];
     _winChance = _chanceToWin(_attackPower, _defendPower);
@@ -216,9 +267,7 @@ class _AttackDialogState extends State<AttackDialog>
                           color: _me?.color,
                         ),
                         power: _attackPower,
-                        lines: [
-                          for (final p in _involved) '${p.name}  ${p.power}',
-                        ],
+                        lines: _involved,
                       ),
                     ),
                     Padding(
@@ -245,7 +294,7 @@ class _AttackDialogState extends State<AttackDialog>
                           color: _defender?.color,
                         ),
                         power: _defendPower,
-                        lines: [widget.targetName],
+                        lines: _defenderLines,
                       ),
                     ),
                   ],
@@ -306,7 +355,7 @@ class _AttackDialogState extends State<AttackDialog>
     required TextAlign textAlign,
     required Widget tag,
     required double power,
-    required List<String> lines,
+    required List<_Line> lines,
   }) {
     return Column(
       crossAxisAlignment: align,
@@ -318,12 +367,23 @@ class _AttackDialogState extends State<AttackDialog>
           style: ConqueraText.figure.copyWith(fontSize: 36),
         ),
         for (final line in lines)
-          Text(
-            line,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: textAlign,
-            style: ConqueraText.label,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (line.icon != null) ...[
+                Icon(line.icon, size: 13, color: ConqueraColors.muted),
+                const SizedBox(width: 4),
+              ],
+              Flexible(
+                child: Text(
+                  line.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: textAlign,
+                  style: ConqueraText.label,
+                ),
+              ),
+            ],
           ),
       ],
     );
