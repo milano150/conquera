@@ -70,14 +70,10 @@ class GameRules {
 
   /// Gold price of claiming a bordering unclaimed province. Claiming counts
   /// as an attack, so it starts the attack cooldown too.
-  static const int claimCost = 500;
+  static const int claimCost = 100;
 
   /// How long a player must wait between attacks (win or lose).
   static const Duration attackCooldown = Duration(minutes: 1);
-
-  /// The luck margin of a battle: each side's power is multiplied by a
-  /// random number between (1 - attackLuck) and (1 + attackLuck).
-  static const double attackLuck = 0.30;
 
   /// Taxes: every territory a player owns earns this much gold per second.
   static const double goldPerTerritoryPerSec = 0.01;

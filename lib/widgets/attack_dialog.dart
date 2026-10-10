@@ -14,8 +14,8 @@ import 'player_tag.dart';
 /// The battle window, in three steps:
 ///   1. Preview: X vs Y (X is every province the player owns that borders
 ///      the target, plus barracks that border one of those; Y is the target,
-///      boosted if it has a fortress) and the player's chance to win.
-///      Nothing has happened yet; the player can cancel or confirm.
+///      boosted if it has a fortress) and what the outcome will be (X minus Y,
+///      no luck). Nothing has happened yet; the player can cancel or confirm.
 ///   2. Fight: after Confirm, a short animation while the attack resolves.
 ///   3. Result: Victory or Defeat.
 ///
@@ -82,7 +82,6 @@ class _AttackDialogState extends State<AttackDialog>
   late final List<_Line> _defenderLines;
   late final PlayerState? _me;
   late final PlayerState? _defender;
-  late final double _winChance;
 
   bool _confirmed = false;
   AttackResult? _result;
@@ -156,31 +155,16 @@ class _AttackDialogState extends State<AttackDialog>
     ];
     _me = players[widget.uid];
     _defender = players[target?.ownerId];
-    _winChance = _chanceToWin(_attackPower, _defendPower);
   }
 
-  /// Probability that the attacker wins once both luck rolls are made,
-  /// worked out by stepping through every combination of the two rolls.
-  static double _chanceToWin(double attack, double defend) {
-    if (attack <= 0) return 0;
-    if (defend <= 0) return 1;
-    const steps = 200;
-    final luck = GameRules.attackLuck;
-    var wins = 0;
-    for (var i = 0; i < steps; i++) {
-      final a = attack * (1 + (((i + 0.5) / steps) * 2 - 1) * luck);
-      for (var j = 0; j < steps; j++) {
-        final d = defend * (1 + (((j + 0.5) / steps) * 2 - 1) * luck);
-        if (a > d) wins++;
-      }
-    }
-    return wins / (steps * steps);
-  }
+  /// Battles are plain subtraction: the attacker wins only with strictly more
+  /// power than the defender.
+  bool get _wouldWin => _attackPower > _defendPower;
 
-  int get _winPercent {
-    if (_winChance >= 1) return 100;
-    if (_winChance <= 0) return 0;
-    return (_winChance * 100).round().clamp(1, 99);
+  /// Each side's share of the total power, for the bar in the preview.
+  double get _powerShare {
+    final total = _attackPower + _defendPower;
+    return total <= 0 ? 0.5 : _attackPower / total;
   }
 
   void _confirm() {
@@ -389,8 +373,8 @@ class _AttackDialogState extends State<AttackDialog>
     );
   }
 
-  /// Tug-of-war bar: wobbles while the fight runs, then settles on each
-  /// side's share of the luck-adjusted strength.
+  /// Tug-of-war bar: shows each side's share of the power in the preview,
+  /// wobbles while the fight runs, then tips toward the winner.
   Widget _bar() {
     final left = _me?.color ?? ConqueraColors.accent;
     final right = _defender?.color ?? ConqueraColors.muted;
@@ -416,8 +400,8 @@ class _AttackDialogState extends State<AttackDialog>
       );
     }
 
-    // Preview: the bar is the chance to win.
-    if (!_confirmed) return paint(_winChance);
+    // Preview: the bar is each side's share of the power.
+    if (!_confirmed) return paint(_powerShare);
 
     final result = _result;
     if (result == null) {
@@ -427,7 +411,7 @@ class _AttackDialogState extends State<AttackDialog>
       );
     }
 
-    // The luck rolls stay hidden: the bar just tips toward the winner.
+    // After the fight the bar just tips toward the winner.
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.5, end: result.won ? 0.85 : 0.15),
       duration: const Duration(milliseconds: 700),
@@ -444,23 +428,25 @@ class _AttackDialogState extends State<AttackDialog>
       );
     }
     if (!_confirmed) {
-      return Row(
-        children: [
-          Text('Chance to win ', style: ConqueraText.label),
-          Text(
-            '$_winPercent%',
-            style: ConqueraText.value.copyWith(fontWeight: FontWeight.w600),
-          ),
-          if (_attackPower <= 0) ...[
-            const SizedBox(width: ConqueraSpace.sm),
-            Expanded(
-              child: Text(
-                'Your bordering provinces have no power.',
-                style: ConqueraText.label.copyWith(color: ConqueraColors.danger),
-              ),
-            ),
-          ],
-        ],
+      if (_attackPower <= 0) {
+        return Text(
+          'Your bordering provinces have no power.',
+          style: ConqueraText.label.copyWith(color: ConqueraColors.danger),
+        );
+      }
+      if (_wouldWin) {
+        final left = (_attackPower - _defendPower).floor();
+        return Text(
+          'You win with $left power left over.',
+          style: ConqueraText.value.copyWith(fontWeight: FontWeight.w600),
+        );
+      }
+      return Text(
+        'Not enough power: this attack would fail.',
+        style: ConqueraText.value.copyWith(
+          fontWeight: FontWeight.w600,
+          color: ConqueraColors.danger,
+        ),
       );
     }
     if (result == null) {
@@ -472,6 +458,7 @@ class _AttackDialogState extends State<AttackDialog>
     final color = result.won ? ConqueraColors.accent : ConqueraColors.danger;
     final detail = result.won
         ? '${widget.targetName} is annexed.'
+            '${result.buildingDestroyed ? ' Its building was destroyed.' : ''}'
         : 'Your attack on ${widget.targetName} failed.';
 
     return Column(

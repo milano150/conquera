@@ -367,11 +367,12 @@ class FirestoreService {
   ///
   /// Attacker power X = the troops of everyone fighting added together;
   /// defender power Y = the target's troops, times 1.5 if it has a fortress.
-  /// Each side gets a random luck multiplier (see [GameRules.attackLuck]);
-  /// the higher one wins, a tie goes to the defender.
+  /// No luck: if X > Y the attacker wins, otherwise (a tie included) the
+  /// defender holds.
   ///
-  /// Win: X is spread evenly over everyone who fought and the annexed
-  /// province, which changes hands (building included).
+  /// Win: the leftover X - Y is spread evenly over everyone who fought and
+  /// the annexed province, which changes hands. Any building on it is
+  /// destroyed.
   /// Loss: everyone who fought loses all their power, and the defender loses
   /// the same amount (down to 0).
   /// Either way the attacker's cooldown starts.
@@ -386,7 +387,6 @@ class FirestoreService {
     required String targetId,
     required Iterable<String> neighborIds,
     Map<String, Set<String>> supportLinks = const {},
-    Random? random,
   }) async {
     final targetRef = _provincesRef(gameId).doc(targetId);
     final attackerRef = _playerRef(gameId, uid);
@@ -401,7 +401,6 @@ class FirestoreService {
     final supportRefs = [
       for (final id in supportIds) _provincesRef(gameId).doc(id),
     ];
-    final rng = random ?? Random();
 
     AttackResult? result;
     String? error;
@@ -488,32 +487,35 @@ class FirestoreService {
       final defenderRaw = (targetData?['troops'] as num?)?.toDouble() ?? 0;
       final defenderPower = defenderRaw * defenseMultiplier;
 
-      double luck() => 1 + (rng.nextDouble() * 2 - 1) * GameRules.attackLuck;
-      final attackerStrength = attackerPower * luck();
-      final defenderStrength = defenderPower * luck();
-      final won = attackerStrength > defenderStrength;
+      // Pure subtraction, no luck. A tie goes to the defender.
+      final won = attackerPower > defenderPower;
 
       final attackedAt = Timestamp.fromDate(now);
       final stamp = FieldValue.serverTimestamp();
 
       if (won) {
-        // Normalize: X is shared evenly between the fighters and Y.
-        final share = attackerPower / (fighters.length + 1);
+        // What is left after the fight (X - Y) is shared evenly between the
+        // fighters and the annexed province.
+        final share = (attackerPower - defenderPower) / (fighters.length + 1);
         for (final snap in fighters) {
           tx.update(snap.reference, {'troops': share, 'troopsUpdatedAt': stamp});
         }
 
+        // The building does not survive the invasion. A gold mine therefore
+        // is lost by the defender and never gained by the attacker.
+        final hadBuilding = _buildingTypeOf(targetData) != 'none';
         final mineDelta = _hasGoldMine(targetData) ? 1 : 0;
         tx.update(targetRef, {
           'ownerId': uid,
           'troops': share,
           'troopsUpdatedAt': stamp,
+          'building': {'type': 'none', 'level': 0},
         });
         tx.update(attackerRef, {
           ..._settledIncomeUpdate(
             attackerSnap,
             owned: _ownedCount(attackerSnap) + 1,
-            mines: _mineCount(attackerSnap) + mineDelta,
+            mines: _mineCount(attackerSnap),
             now: now,
           ),
           'lastAttackAt': attackedAt,
@@ -534,11 +536,10 @@ class FirestoreService {
           won: true,
           attackerPower: attackerPower,
           defenderPower: defenderPower,
-          attackerStrength: attackerStrength,
-          defenderStrength: defenderStrength,
           attackerProvinceCount: fighters.length,
           powerAfter: share,
           defenderPowerLeft: 0,
+          buildingDestroyed: hadBuilding,
         );
       } else {
         // The defender's lost power is taken off its boosted power, then
@@ -555,8 +556,6 @@ class FirestoreService {
           won: false,
           attackerPower: attackerPower,
           defenderPower: defenderPower,
-          attackerStrength: attackerStrength,
-          defenderStrength: defenderStrength,
           attackerProvinceCount: fighters.length,
           powerAfter: 0,
           defenderPowerLeft: left,

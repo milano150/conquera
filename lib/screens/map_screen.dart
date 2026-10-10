@@ -16,8 +16,10 @@ import '../state/map_controller.dart';
 import '../theme/conquera_theme.dart';
 import '../widgets/attack_dialog.dart';
 import '../widgets/country_info_panel.dart';
+import '../widgets/gold_amount.dart';
 import '../widgets/player_top_bar.dart';
 import '../widgets/province_detail_dialog.dart';
+import '../widgets/world_sidebar.dart';
 
 /// Pannable, zoomable world map. Tap a country to outline it and open its
 /// info panel; tap the ocean (or the close button) to clear. The panel's
@@ -234,9 +236,18 @@ class _MapScreenState extends State<MapScreen> {
           side: const BorderSide(color: ConqueraColors.divider),
         ),
         title: Text('Claim ${target.name}?', style: ConqueraText.name),
-        content: Text(
-          'It costs $cost gold and starts your attack cooldown.',
-          style: ConqueraText.value,
+        content: Text.rich(
+          TextSpan(
+            style: ConqueraText.value,
+            children: [
+              const TextSpan(text: 'It costs '),
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: GoldAmount(cost, style: ConqueraText.value),
+              ),
+              const TextSpan(text: ' and starts your attack cooldown.'),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -245,7 +256,13 @@ class _MapScreenState extends State<MapScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Claim for $cost'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Claim for '),
+                GoldAmount(cost),
+              ],
+            ),
           ),
         ],
       ),
@@ -361,167 +378,181 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  /// Whether the left menu is open (the world blurs behind it).
+  bool _sidebarOpen = false;
+
   @override
   Widget build(BuildContext context) {
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,
-      child: Scaffold(
-        appBar: PlayerTopBar(
-          gameId: FirestoreService.defaultGameId,
-          uid: FirebaseAuth.instance.currentUser!.uid,
-        ),
-        body: ListenableBuilder(
-          listenable: Listenable.merge([_controller, _provinceStates, _players]),
-          builder: (context, _) {
-            if (_controller.loadError != null) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(ConqueraSpace.lg),
-                  child: Text(
-                    'The map could not be loaded.\n${_controller.loadError}',
-                    textAlign: TextAlign.center,
-                    style: ConqueraText.value,
-                  ),
-                ),
-              );
-            }
-            if (!_controller.isLoaded) {
-              return const Center(child: CircularProgressIndicator());
-            }
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Scaffold(
+            appBar: PlayerTopBar(
+              gameId: FirestoreService.defaultGameId,
+              uid: FirebaseAuth.instance.currentUser!.uid,
+              onMenuPressed: () => setState(() => _sidebarOpen = true),
+            ),
+            body: ListenableBuilder(
+              listenable: Listenable.merge([_controller, _provinceStates, _players]),
+              builder: (context, _) {
+                if (_controller.loadError != null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(ConqueraSpace.lg),
+                      child: Text(
+                        'The map could not be loaded.\n${_controller.loadError}',
+                        textAlign: TextAlign.center,
+                        style: ConqueraText.value,
+                      ),
+                    ),
+                  );
+                }
+                if (!_controller.isLoaded) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-            final selected = _controller.selectedProvince;
-            final selectedState =
-                selected == null ? null : _provinceStates.value[selected.id];
-            final selectedOwner = _players.value[selectedState?.ownerId];
+                final selected = _controller.selectedProvince;
+                final selectedState =
+                    selected == null ? null : _provinceStates.value[selected.id];
+                final selectedOwner = _players.value[selectedState?.ownerId];
 
-            // Another player's province gets an Attack button; it only works
-            // if one of the player's own provinces borders it.
-            final selectedOwnerId = selectedState?.ownerId;
-            final isEnemy = selected != null &&
-                selectedOwnerId != null &&
-                selectedOwnerId != _uid;
-            final isUnclaimed = selected != null && selectedOwnerId == null;
+                // Another player's province gets an Attack button; it only works
+                // if one of the player's own provinces borders it.
+                final selectedOwnerId = selectedState?.ownerId;
+                final isEnemy = selected != null &&
+                    selectedOwnerId != null &&
+                    selectedOwnerId != _uid;
+                final isUnclaimed = selected != null && selectedOwnerId == null;
 
-            // Attacking and claiming both need a bordering province of ours.
-            final canAttack = selected != null &&
-                (isEnemy || isUnclaimed) &&
-                _myBorderingIds(selected).isNotEmpty;
-            final attackReadyAt = _players.value[_uid]?.attackReadyAt;
+                // Attacking and claiming both need a bordering province of ours.
+                final canAttack = selected != null &&
+                    (isEnemy || isUnclaimed) &&
+                    _myBorderingIds(selected).isNotEmpty;
+                final attackReadyAt = _players.value[_uid]?.attackReadyAt;
 
-            return Stack(
-              children: [
-                Positioned.fill(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final viewport = constraints.biggest;
-                      if (_fittedFor != viewport) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) _fitToViewport(viewport);
-                        });
-                      }
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final viewport = constraints.biggest;
+                          if (_fittedFor != viewport) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) _fitToViewport(viewport);
+                            });
+                          }
 
-                      // Can't zoom out past "Africa fills the screen".
-                      final minScale = _minScaleFor(viewport);
-                      final maxScale = max(_maxScale, minScale * 14);
-                      final powerMinScale = minScale * _powerZoomFactor;
+                          // Can't zoom out past "Africa fills the screen".
+                          final minScale = _minScaleFor(viewport);
+                          final maxScale = max(_maxScale, minScale * 14);
+                          final powerMinScale = minScale * _powerZoomFactor;
 
-                      return InteractiveViewer(
-                        transformationController: _transform,
-                        constrained: false,
-                        minScale: minScale,
-                        maxScale: maxScale,
-                        boundaryMargin: const EdgeInsets.all(_boundaryMargin),
-                        child: Listener(
-                          behavior: HitTestBehavior.opaque,
-                          onPointerDown: _onPointerDown,
-                          onPointerUp: _onPointerUp,
-                          child: SizedBox(
-                            width: _controller.mapSize.width,
-                            height: _controller.mapSize.height,
-                            child: Stack(
-                              children: [
-                                RepaintBoundary(
-                                  child: CustomPaint(
-                                    size: _controller.mapSize,
-                                    painter: MapPainter(
-                                      provinces: _controller.provinces,
-                                      ownerFillColors: _ownerFillColors(),
-                                    ),
-                                  ),
-                                ),
-                                IgnorePointer(
-                                  child: RepaintBoundary(
-                                    child: CustomPaint(
-                                      size: _controller.mapSize,
-                                      painter: BadgePainter(
-                                        badges: _badges(),
-                                        transform: _transform,
-                                        powerMinScale: powerMinScale,
-                                        iconSize: _iconPxAtMinZoom / minScale,
-                                        powerSize:
-                                            _powerPxAtPowerZoom / powerMinScale,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                IgnorePointer(
-                                  child: RepaintBoundary(
-                                    child: AnimatedBuilder(
-                                      animation: _transform,
-                                      builder: (context, _) => CustomPaint(
+                          return InteractiveViewer(
+                            transformationController: _transform,
+                            constrained: false,
+                            minScale: minScale,
+                            maxScale: maxScale,
+                            boundaryMargin: const EdgeInsets.all(_boundaryMargin),
+                            child: Listener(
+                              behavior: HitTestBehavior.opaque,
+                              onPointerDown: _onPointerDown,
+                              onPointerUp: _onPointerUp,
+                              child: SizedBox(
+                                width: _controller.mapSize.width,
+                                height: _controller.mapSize.height,
+                                child: Stack(
+                                  children: [
+                                    RepaintBoundary(
+                                      child: CustomPaint(
                                         size: _controller.mapSize,
-                                        painter: SelectionPainter(
-                                          path: selected?.path,
-                                          scale: _transform.value
-                                              .getMaxScaleOnAxis(),
+                                        painter: MapPainter(
+                                          provinces: _controller.provinces,
+                                          ownerFillColors: _ownerFillColors(),
                                         ),
                                       ),
                                     ),
-                                  ),
+                                    IgnorePointer(
+                                      child: RepaintBoundary(
+                                        child: CustomPaint(
+                                          size: _controller.mapSize,
+                                          painter: BadgePainter(
+                                            badges: _badges(),
+                                            transform: _transform,
+                                            powerMinScale: powerMinScale,
+                                            iconSize: _iconPxAtMinZoom / minScale,
+                                            powerSize:
+                                                _powerPxAtPowerZoom / powerMinScale,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    IgnorePointer(
+                                      child: RepaintBoundary(
+                                        child: AnimatedBuilder(
+                                          animation: _transform,
+                                          builder: (context, _) => CustomPaint(
+                                            size: _controller.mapSize,
+                                            painter: SelectionPainter(
+                                              path: selected?.path,
+                                              scale: _transform.value
+                                                  .getMaxScaleOnAxis(),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: AnimatedSize(
-                    duration: const Duration(milliseconds: 160),
-                    curve: Curves.easeOut,
-                    alignment: Alignment.topCenter,
-                    child: selected == null
-                        ? const SizedBox(width: double.infinity)
-                        : CountryInfoPanel(
-                            name: selected.name,
-                            ownerName: selectedOwner?.displayName ??
-                                (selectedState?.ownerId != null
-                                    ? 'Unknown player'
-                                    : null),
-                            ownerColor: selectedOwner?.color,
-                            power: '${(selectedState?.troops ?? 0).floor()}',
-                            building: selectedState?.buildingLabel ?? 'None',
-                            onClose: _controller.clearSelection,
-                            onOpenDetails: () => _openDetails(selected),
-                            isEnemy: isEnemy,
-                            isUnclaimed: isUnclaimed,
-                            canAttack: canAttack,
-                            attackReadyAt: attackReadyAt,
-                            onAttack: () => _openAttack(selected),
-                            onClaim: () => _claim(selected),
-                          ),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
+                          );
+                        },
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 160),
+                        curve: Curves.easeOut,
+                        alignment: Alignment.topCenter,
+                        child: selected == null
+                            ? const SizedBox(width: double.infinity)
+                            : CountryInfoPanel(
+                                name: selected.name,
+                                ownerName: selectedOwner?.displayName ??
+                                    (selectedState?.ownerId != null
+                                        ? 'Unknown player'
+                                        : null),
+                                ownerColor: selectedOwner?.color,
+                                power: '${(selectedState?.troops ?? 0).floor()}',
+                                building: selectedState?.buildingLabel ?? 'None',
+                                onClose: _controller.clearSelection,
+                                onOpenDetails: () => _openDetails(selected),
+                                isEnemy: isEnemy,
+                                isUnclaimed: isUnclaimed,
+                                canAttack: canAttack,
+                                attackReadyAt: attackReadyAt,
+                                onAttack: () => _openAttack(selected),
+                                onClaim: () => _claim(selected),
+                              ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          WorldSidebar(
+            open: _sidebarOpen,
+            worldId: FirestoreService.defaultGameId,
+            onClose: () => setState(() => _sidebarOpen = false),
+          ),
+        ],
       ),
     );
   }

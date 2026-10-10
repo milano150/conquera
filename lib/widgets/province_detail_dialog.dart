@@ -8,6 +8,7 @@ import '../models/player_state.dart';
 import '../models/province_state.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
+import 'gold_amount.dart';
 import 'player_tag.dart';
 import 'stat_block.dart';
 
@@ -377,7 +378,8 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   value: pending,
                   hint: 'Select building',
                   items: GameRules.buildings,
-                  label: (b) => '${b.name}  ·  ${b.cost} gold',
+                  name: (b) => b.name,
+                  price: (b) => b.cost,
                   isEnabled: (b) => gold >= b.cost,
                   onChanged: _busy
                       ? null
@@ -385,9 +387,10 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                 ),
                 const SizedBox(height: ConqueraSpace.sm),
                 _ActionRow(
+                  price: pending?.cost,
                   info: pending == null
                       ? (cooling ? 'Cooling down after destroying a building' : '')
-                      : '${pending.cost} gold  ·  ${pending.effectLabel}',
+                      : pending.effectLabel,
                   unaffordable: unaffordable,
                   button: FilledButton(
                     onPressed: canBuild ? _build : null,
@@ -422,13 +425,15 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         value: unit,
         hint: 'Select unit',
         items: GameRules.units,
-        label: (u) => '${u.name}  ·  ${u.cost} gold',
+        name: (u) => u.name,
+        price: (u) => u.cost,
         isEnabled: (u) => gold >= u.cost,
         onChanged: _busy ? null : (u) => setState(() => _unit = u),
       ),
       const SizedBox(height: ConqueraSpace.sm),
       _ActionRow(
-        info: unit == null ? '' : '${unit.cost} gold  ·  +${unit.power} power',
+        price: unit?.cost,
+        info: unit == null ? '' : '+${unit.power} power',
         unaffordable: unaffordable,
         button: FilledButton(
           onPressed: canRecruit ? _recruit : null,
@@ -573,9 +578,11 @@ class _LockedField extends StatelessWidget {
   }
 }
 
-/// Price / effect text on the left, action button on the right.
+/// Price / effect text on the left, action button on the right. The price
+/// is shown with the gold coin icon.
 class _ActionRow extends StatelessWidget {
   final String info;
+  final int? price;
   final bool unaffordable;
   final Widget button;
 
@@ -583,24 +590,46 @@ class _ActionRow extends StatelessWidget {
     required this.info,
     required this.unaffordable,
     required this.button,
+    this.price,
   });
 
   @override
   Widget build(BuildContext context) {
+    final style = ConqueraText.label.copyWith(
+      color: unaffordable ? ConqueraColors.danger : ConqueraColors.muted,
+    );
+
+    final spans = <InlineSpan>[];
+    void separator() {
+      if (spans.isNotEmpty) spans.add(const TextSpan(text: '  ·  '));
+    }
+
+    if (price != null) {
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: GoldAmount(price!, style: style, iconSize: 13),
+        ),
+      );
+    }
+    if (info.isNotEmpty) {
+      separator();
+      spans.add(TextSpan(text: info));
+    }
+    if (unaffordable) {
+      separator();
+      spans.add(const TextSpan(text: 'not enough gold'));
+    }
+
     return Row(
       children: [
         Expanded(
-          child: info.isEmpty
+          child: spans.isEmpty
               ? const SizedBox.shrink()
-              : Text(
-                  unaffordable ? '$info  ·  not enough gold' : info,
+              : Text.rich(
+                  TextSpan(style: style, children: spans),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: ConqueraText.label.copyWith(
-                    color: unaffordable
-                        ? ConqueraColors.danger
-                        : ConqueraColors.muted,
-                  ),
                 ),
         ),
         const SizedBox(width: ConqueraSpace.sm),
@@ -618,7 +647,10 @@ class _Dropdown<T> extends StatelessWidget {
   final T? value;
   final String hint;
   final List<T> items;
-  final String Function(T) label;
+  final String Function(T) name;
+
+  /// Gold price shown after the name with the coin icon.
+  final int Function(T) price;
   final bool Function(T)? isEnabled;
   final ValueChanged<T?>? onChanged;
 
@@ -626,7 +658,8 @@ class _Dropdown<T> extends StatelessWidget {
     required this.value,
     required this.hint,
     required this.items,
-    required this.label,
+    required this.name,
+    required this.price,
     required this.onChanged,
     this.isEnabled,
   });
@@ -660,12 +693,7 @@ class _Dropdown<T> extends StatelessWidget {
             for (final item in items)
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text(
-                  label(item),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: ConqueraText.value,
-                ),
+                child: _entry(item, ConqueraText.value, faded: false),
               ),
           ],
           items: [
@@ -677,19 +705,36 @@ class _Dropdown<T> extends StatelessWidget {
     );
   }
 
+  /// "Name  ·  [coin] price" on one line.
+  Widget _entry(T item, TextStyle style, {required bool faded}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            '${name(item)}  ·  ',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+        GoldAmount(price(item), style: style, faded: faded),
+      ],
+    );
+  }
+
   DropdownMenuItem<T> _menuItem(T item, {required bool enabled}) {
     return DropdownMenuItem<T>(
       value: item,
       enabled: enabled,
-      child: Text(
-        label(item),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: enabled
+      child: _entry(
+        item,
+        enabled
             ? ConqueraText.value
             : ConqueraText.value.copyWith(
                 color: ConqueraColors.muted.withAlpha(110),
               ),
+        faded: !enabled,
       ),
     );
   }

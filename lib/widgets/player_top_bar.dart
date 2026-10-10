@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../models/player_state.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
+import 'gold_amount.dart';
 import 'player_tag.dart';
 
-/// Top bar: the player on the left, gold on the right.
+/// Top bar: menu button on the left, the player in the middle, gold on the
+/// right. The two sides take equal room, so the player stays centered.
 ///
 /// Gold is computed locally from the stored snapshot (see
 /// [PlayerState.goldAt]) and refreshed once a second, so it ticks up
@@ -16,7 +18,15 @@ class PlayerTopBar extends StatefulWidget implements PreferredSizeWidget {
   final String gameId;
   final String uid;
 
-  const PlayerTopBar({super.key, required this.gameId, required this.uid});
+  /// The menu (three lines) button was tapped.
+  final VoidCallback onMenuPressed;
+
+  const PlayerTopBar({
+    super.key,
+    required this.gameId,
+    required this.uid,
+    required this.onMenuPressed,
+  });
 
   static const double height = 56;
 
@@ -70,16 +80,31 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
                     Expanded(
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: PlayerTag(
-                          name: player?.displayName ?? '...',
-                          color: player?.color,
+                        child: IconButton(
+                          onPressed: widget.onMenuPressed,
+                          tooltip: 'Menu',
+                          icon: const Icon(Icons.menu, size: 24),
+                          color: ConqueraColors.ink,
+                          visualDensity: VisualDensity.compact,
                         ),
                       ),
                     ),
-                    const SizedBox(width: ConqueraSpace.md),
-                    _GoldReadout(
-                      gold: player?.goldAt(DateTime.now()),
-                      rate: player?.goldRate,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 160),
+                      child: PlayerTag(
+                        name: player?.displayName ?? '...',
+                        color: player?.color,
+                        rectangle: true,
+                      ),
+                    ),
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: _GoldReadout(
+                          gold: player?.goldAt(DateTime.now()),
+                          rate: player?.goldRate,
+                        ),
+                      ),
                     ),
                   ],
                 );
@@ -124,14 +149,7 @@ class _GoldReadout extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: const BoxDecoration(
-            color: ConqueraColors.brass,
-            shape: BoxShape.circle,
-          ),
-        ),
+        const GoldIcon(size: 18),
         const SizedBox(width: ConqueraSpace.sm),
         Text.rich(
           TextSpan(

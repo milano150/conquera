@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/game_rules.dart';
 import '../theme/conquera_theme.dart';
+import 'gold_amount.dart';
 import 'player_tag.dart';
 import 'stat_block.dart';
 
@@ -128,7 +129,6 @@ class CountryInfoPanel extends StatelessWidget {
                   if (isEnemy)
                     _ActionButton(
                       label: 'Attack',
-                      icon: Icons.bolt,
                       color: ConqueraColors.danger,
                       enabled: canAttack,
                       readyAt: attackReadyAt,
@@ -136,28 +136,24 @@ class CountryInfoPanel extends StatelessWidget {
                       onPressed: onAttack,
                     )
                   else if (isUnclaimed)
-                    _ActionButton(
-                      label: 'Claim',
-                      icon: Icons.flag,
-                      color: ConqueraColors.accent,
-                      enabled: canAttack,
-                      readyAt: attackReadyAt,
-                      hint: canAttack
-                          ? 'Costs ${GameRules.claimCost} gold'
-                          : 'Not bordering your land',
-                      onPressed: onClaim,
-                    )
+                    // Only offered when one of the player's provinces
+                    // borders it; otherwise there is no button at all.
+                    ...[
+                      if (canAttack)
+                        _ActionButton(
+                          label: 'Claim',
+                          price: GameRules.claimCost,
+                          color: ConqueraColors.accent,
+                          enabled: true,
+                          readyAt: attackReadyAt,
+                          hint: null,
+                          onPressed: onClaim,
+                        ),
+                    ]
                   else
                     OutlinedButton(
                       onPressed: onOpenDetails,
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('Manage'),
-                          SizedBox(width: 6),
-                          Icon(Icons.arrow_forward, size: 16),
-                        ],
-                      ),
+                      child: const Text('Manage'),
                     ),
                 ],
               ),
@@ -169,13 +165,16 @@ class CountryInfoPanel extends StatelessWidget {
   }
 }
 
-/// The panel's action button (red Attack, blue Claim). Disabled when none
+/// The panel's action button (red Attack, blue Claim), hollow like Manage.
+/// Disabled when none
 /// of the player's provinces border the country; while the attack cooldown
 /// runs it shows a countdown and ticks once a second on its own (so the
 /// panel doesn't rebuild). [hint] is a small caption under the button.
 class _ActionButton extends StatefulWidget {
   final String label;
-  final IconData icon;
+
+  /// Gold price shown after the label (Claim); null for none.
+  final int? price;
   final Color color;
   final bool enabled;
   final DateTime? readyAt;
@@ -184,12 +183,12 @@ class _ActionButton extends StatefulWidget {
 
   const _ActionButton({
     required this.label,
-    required this.icon,
     required this.color,
     required this.enabled,
     required this.readyAt,
     required this.hint,
     required this.onPressed,
+    this.price,
   });
 
   @override
@@ -245,29 +244,33 @@ class _ActionButtonState extends State<_ActionButton> {
     final left = _left();
     final cooling = left > Duration.zero;
     final hint = widget.hint;
+    final active = widget.enabled && !cooling;
+    final price = widget.price;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        FilledButton(
-          onPressed: widget.enabled && !cooling ? widget.onPressed : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: widget.color,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: ConqueraColors.divider.withAlpha(90),
-            disabledForegroundColor: ConqueraColors.muted,
-            minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+        // Same size, font and shape as the Manage button (from the theme);
+        // only the outline color tells the actions apart.
+        OutlinedButton(
+          onPressed: active ? widget.onPressed : null,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: widget.color,
+            side: BorderSide(
+              color: active ? widget.color : ConqueraColors.divider,
+            ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(cooling ? '${widget.label} ${_clock(left)}' : widget.label),
-              const SizedBox(width: 6),
-              Icon(widget.icon, size: 16),
-            ],
-          ),
+          child: cooling || price == null
+              ? Text(cooling ? '${widget.label} ${_clock(left)}' : widget.label)
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(widget.label),
+                    const SizedBox(width: 6),
+                    GoldAmount(price),
+                  ],
+                ),
         ),
         if (hint != null) ...[
           const SizedBox(height: ConqueraSpace.xs),
