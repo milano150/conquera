@@ -94,7 +94,7 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
                       child: PlayerTag(
                         name: player?.displayName ?? '...',
                         color: player?.color,
-                        rectangle: true,
+                        square: true,
                       ),
                     ),
                     Expanded(

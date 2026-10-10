@@ -12,15 +12,15 @@ class PlayerTag extends StatelessWidget {
   final Color? color;
   final TextStyle? style;
 
-  /// A bigger rounded rectangle of color instead of the small dot.
-  final bool rectangle;
+  /// A bigger rounded square of color instead of the small dot.
+  final bool square;
 
   const PlayerTag({
     super.key,
     required this.name,
     this.color,
     this.style,
-    this.rectangle = false,
+    this.square = false,
   });
 
   static const double _dot = 10;
@@ -33,18 +33,18 @@ class PlayerTag extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: rectangle ? 28 : _dot,
-          height: rectangle ? 18 : _dot,
+          width: square ? 24 : _dot,
+          height: square ? 24 : _dot,
           decoration: BoxDecoration(
             color: color,
-            shape: rectangle ? BoxShape.rectangle : BoxShape.circle,
-            borderRadius: rectangle ? BorderRadius.circular(5) : null,
+            shape: square ? BoxShape.rectangle : BoxShape.circle,
+            borderRadius: square ? BorderRadius.circular(7) : null,
             border: filled
                 ? null
                 : Border.all(color: ConqueraColors.muted, width: 1.5),
           ),
         ),
-        SizedBox(width: rectangle ? 10 : ConqueraSpace.sm),
+        SizedBox(width: square ? 10 : ConqueraSpace.sm),
         Flexible(
           child: Text(
             name,

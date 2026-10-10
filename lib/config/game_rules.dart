@@ -72,6 +72,9 @@ class GameRules {
   /// as an attack, so it starts the attack cooldown too.
   static const int claimCost = 100;
 
+  /// Gold a player starts with when joining a world.
+  static const int startingGold = 300;
+
   /// How long a player must wait between attacks (win or lose).
   static const Duration attackCooldown = Duration(minutes: 1);
 

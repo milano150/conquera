@@ -32,20 +32,6 @@ class FirestoreService {
 
   final FirebaseFirestore _db;
 
-  /// One shared world for now.
-  static const String defaultGameId = 'main';
-
-  /// Small fixed palette; a player's color is picked from it by uid so it
-  /// stays the same every time they join.
-  static const List<String> _playerColors = [
-    '#E63946',
-    '#2A9D8F',
-    '#457B9D',
-    '#E9A23B',
-    '#7B2CBF',
-    '#F4A261',
-  ];
-
   DocumentReference<Map<String, dynamic>> _gameRef(String gameId) =>
       _db.collection('games').doc(gameId);
 
@@ -689,46 +675,83 @@ class FirestoreService {
     debugPrint('Income reconciled: $owned territories, $mines gold mines');
   }
 
-  /// Makes sure the game and this player's document exist. Safe to call on
-  /// every launch: existing documents are left untouched, so a returning
-  /// player keeps their color and (later) their gold.
-  Future<void> ensureJoined({
+  /// True if a world with this id exists. Worlds are created by hand in the
+  /// database; the app never creates one.
+  Future<bool> worldExists(String gameId) async {
+    final snap = await _gameRef(gameId).get();
+    return snap.exists;
+  }
+
+  /// True if [uid] has already joined the world (picked a name and color).
+  Future<bool> playerExists({
     required String gameId,
     required String uid,
   }) async {
-    final gameRef = _gameRef(gameId);
-    final gameSnap = await gameRef.get();
-    if (!gameSnap.exists) {
-      await gameRef.set({
-        'name': 'Conquera World',
-        'status': 'active',
-        'createdAt': FieldValue.serverTimestamp(),
-        'config': {
-          'troopRegenPerSec': 0.1,
-          'goldPerTerritoryPerSec': GameRules.goldPerTerritoryPerSec,
-        },
-      });
-      debugPrint('Created game "$gameId"');
-    }
+    final snap = await _playerRef(gameId, uid).get();
+    return snap.exists;
+  }
 
+  /// Re-checks a returning player's territory and gold-mine counts against
+  /// the provinces they actually own, fixing the income rate if it drifted.
+  Future<void> reconcileIncome({
+    required String gameId,
+    required String uid,
+  }) =>
+      _reconcileTerritoryIncome(gameId: gameId, uid: uid);
+
+  /// Adds a new player to an existing world: creates their document with
+  /// [GameRules.startingGold] and gives them a random free country from
+  /// [spawnCandidates] (province ids) as their starting territory. Returns
+  /// the id of that country.
+  ///
+  /// A candidate someone else owns by the time the transaction runs is
+  /// skipped. Throws [GameActionException] if the player already joined or
+  /// no candidate is free.
+  Future<String> joinWorld({
+    required String gameId,
+    required String uid,
+    required String displayName,
+    required String colorHex,
+    required List<String> spawnCandidates,
+  }) async {
     final playerRef = _playerRef(gameId, uid);
-    final playerSnap = await playerRef.get();
-    if (!playerSnap.exists) {
-      final color = _playerColors[uid.hashCode.abs() % _playerColors.length];
-      await playerRef.set({
-        'displayName': 'Player',
-        'colorHex': color,
-        'joinedAt': FieldValue.serverTimestamp(),
-        // Idle-style resource: a snapshot plus the time it was taken.
-        'gold': 0,
-        'ownedCount': 0,
-        'mineCount': 0,
-        'goldRate': 0.0, // grows with territories and gold mines
-        'goldUpdatedAt': FieldValue.serverTimestamp(),
-      });
-      debugPrint('Created player doc for $uid');
-    }
+    final candidates = [...spawnCandidates]..shuffle();
 
-    await _reconcileTerritoryIncome(gameId: gameId, uid: uid);
+    for (final provinceId in candidates) {
+      final provinceRef = _provincesRef(gameId).doc(provinceId);
+
+      final spawned = await _db.runTransaction<bool>((tx) async {
+        final playerSnap = await tx.get(playerRef);
+        if (playerSnap.exists) {
+          throw const GameActionException('You already joined this world.');
+        }
+        final provinceSnap = await tx.get(provinceRef);
+        if (provinceSnap.exists && provinceSnap.data()?['ownerId'] != null) {
+          return false; // taken, try the next one
+        }
+
+        tx.set(provinceRef, {
+          'ownerId': uid,
+          'troops': 0,
+          'troopsUpdatedAt': FieldValue.serverTimestamp(),
+          'building': {'type': 'none', 'level': 0},
+        });
+        tx.set(playerRef, {
+          'displayName': displayName,
+          'colorHex': colorHex,
+          'joinedAt': FieldValue.serverTimestamp(),
+          // Idle-style resource: a snapshot plus the time it was taken.
+          'gold': GameRules.startingGold.toDouble(),
+          'goldUpdatedAt': FieldValue.serverTimestamp(),
+          'ownedCount': 1,
+          'mineCount': 0,
+          'goldRate': GameRules.incomeRate(territories: 1, goldMines: 0),
+        });
+        return true;
+      });
+
+      if (spawned) return provinceId;
+    }
+    throw const GameActionException('There is no free country to start in.');
   }
 }

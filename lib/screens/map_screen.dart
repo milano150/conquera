@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config/dev_session.dart';
 import '../config/game_rules.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
@@ -36,9 +36,24 @@ import '../widgets/world_sidebar.dart';
 /// and numbers have a fixed size on the map (they grow and shrink with it);
 /// the selection outline keeps a constant on-screen thickness.
 class MapScreen extends StatefulWidget {
+  static const String defaultAssetPath = 'assets/maps/world.svg';
+
+  /// The world (games/{gameId}) being played.
+  final String gameId;
+
+  /// A country to center the camera on at the start (the one the player just
+  /// spawned in). Without it the camera centers on one of the player's own
+  /// countries, or on Africa.
+  final String? focusProvinceId;
+
   final String assetPath;
 
-  const MapScreen({super.key, this.assetPath = 'assets/maps/world.svg'});
+  const MapScreen({
+    super.key,
+    required this.gameId,
+    this.focusProvinceId,
+    this.assetPath = defaultAssetPath,
+  });
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -87,7 +102,7 @@ class _MapScreenState extends State<MapScreen> {
   // Live game data. Notifiers (instead of plain fields) so the province
   // window can listen to the same data without opening its own streams.
   final FirestoreService _firestore = FirestoreService();
-  late final String _uid = FirebaseAuth.instance.currentUser!.uid;
+  late final String _uid = DevSession.uid;
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   final ValueNotifier<Map<String, ProvinceState>> _provinceStates =
@@ -104,13 +119,13 @@ class _MapScreenState extends State<MapScreen> {
     _controller.loadMap(widget.assetPath);
 
     _provincesSub = _firestore
-        .watchProvinces(gameId: FirestoreService.defaultGameId)
+        .watchProvinces(gameId: widget.gameId)
         .listen(
       (states) => _provinceStates.value = states,
       onError: (Object e) => debugPrint('Provinces stream error: $e'),
     );
     _playersSub = _firestore
-        .watchPlayers(gameId: FirestoreService.defaultGameId)
+        .watchPlayers(gameId: widget.gameId)
         .listen(
       (players) => _players.value = players,
       onError: (Object e) => debugPrint('Players stream error: $e'),
@@ -173,7 +188,24 @@ class _MapScreenState extends State<MapScreen> {
     if (map.isEmpty || viewport.isEmpty) return;
 
     final scale = _minScaleFor(viewport);
-    final focus = _africaRect()?.center ?? map.center(Offset.zero);
+    var focus = _africaRect()?.center ?? map.center(Offset.zero);
+
+    // Start on the player's own land if we know where it is, keeping the
+    // view inside the pannable area.
+    final home = _homePoint();
+    if (home != null) {
+      double clampAxis(double v, double lo, double hi) =>
+          lo > hi ? (lo + hi) / 2 : v.clamp(lo, hi).toDouble();
+      final halfW = viewport.width / scale / 2;
+      final halfH = viewport.height / scale / 2;
+      focus = Offset(
+        clampAxis(home.dx, -_boundaryMargin + halfW,
+            map.width + _boundaryMargin - halfW),
+        clampAxis(home.dy, -_boundaryMargin + halfH,
+            map.height + _boundaryMargin - halfH),
+      );
+    }
+
     final dx = viewport.width / 2 - focus.dx * scale;
     final dy = viewport.height / 2 - focus.dy * scale;
 
@@ -181,6 +213,21 @@ class _MapScreenState extends State<MapScreen> {
       ..translate(dx, dy)
       ..scale(scale);
     _fittedFor = viewport;
+  }
+
+  /// Where the player's land is: the country they just spawned in, or else
+  /// any country they own. Null if neither is known yet.
+  Offset? _homePoint() {
+    var id = widget.focusProvinceId;
+    if (id == null) {
+      for (final entry in _provinceStates.value.entries) {
+        if (entry.value.ownerId == _uid) {
+          id = entry.key;
+          break;
+        }
+      }
+    }
+    return id == null ? null : _controller.provinceById(id)?.anchor;
   }
 
   /// provinceId -> owner's color, for the map's owner fills.
@@ -272,7 +319,7 @@ class _MapScreenState extends State<MapScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await _firestore.claimUnclaimedProvince(
-        gameId: FirestoreService.defaultGameId,
+        gameId: widget.gameId,
         uid: _uid,
         provinceId: target.id,
         neighborIds: _controller.neighborsOf(target.id),
@@ -314,7 +361,7 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AttackDialog(
-        gameId: FirestoreService.defaultGameId,
+        gameId: widget.gameId,
         uid: _uid,
         targetId: target.id,
         targetName: target.name,
@@ -335,7 +382,7 @@ class _MapScreenState extends State<MapScreen> {
     showDialog<void>(
       context: context,
       builder: (_) => ProvinceDetailDialog(
-        gameId: FirestoreService.defaultGameId,
+        gameId: widget.gameId,
         uid: _uid,
         provinceId: province.id,
         provinceName: province.name,
@@ -359,7 +406,7 @@ class _MapScreenState extends State<MapScreen> {
 
     _firestore
         .claimProvince(
-          gameId: FirestoreService.defaultGameId,
+          gameId: widget.gameId,
           provinceId: provinceId,
           uid: _uid,
         )
@@ -391,8 +438,8 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           Scaffold(
             appBar: PlayerTopBar(
-              gameId: FirestoreService.defaultGameId,
-              uid: FirebaseAuth.instance.currentUser!.uid,
+              gameId: widget.gameId,
+              uid: _uid,
               onMenuPressed: () => setState(() => _sidebarOpen = true),
             ),
             body: ListenableBuilder(
@@ -549,7 +596,7 @@ class _MapScreenState extends State<MapScreen> {
           ),
           WorldSidebar(
             open: _sidebarOpen,
-            worldId: FirestoreService.defaultGameId,
+            worldId: widget.gameId,
             onClose: () => setState(() => _sidebarOpen = false),
           ),
         ],
