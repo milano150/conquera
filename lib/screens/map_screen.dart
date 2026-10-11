@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../config/dev_session.dart';
 import '../config/game_rules.dart';
+import '../models/attack_result.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
@@ -59,7 +60,8 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen>
+    with TickerProviderStateMixin {
   final MapController _controller = MapController();
   final TransformationController _transform = TransformationController();
 
@@ -113,6 +115,55 @@ class _MapScreenState extends State<MapScreen> {
   /// How opaque an owner's color is over the land fill (0-255).
   static const int _ownerFillAlpha = 170;
 
+  // --- Battle on the map -------------------------------------------------
+  // After "Confirm attack" the dialog closes and the fight plays out here:
+  // involved borders are outlined, then a sweep (win) or shake (loss) plays
+  // and a pop-up names the territory.
+
+  /// The battle being shown; null when none.
+  BattleView? _battle;
+
+  /// Colors forced on provinces while a battle plays, so the base layer
+  /// doesn't flip to the new owner before the sweep reaches it.
+  Map<String, Color> _colorOverrides = const {};
+
+  /// Provinces the base layer skips (the battle layer draws them).
+  Set<String> _hiddenIds = const {};
+
+  /// Pulse of the outlines (repeats while the battle is shown).
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+
+  /// The sweep (win) or shake (loss), 0..1.
+  late final AnimationController _fx = AnimationController(vsync: this);
+
+  /// The pop-up text, 0..1.
+  late final AnimationController _popupAnim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  );
+  _Popup? _popup;
+
+  bool get _battleRunning => _battle != null;
+
+  // --- Camera pan toward the war zone -----------------------------------
+  /// Last viewport size, remembered so the camera can be moved from code.
+  Size _viewport = Size.zero;
+  late final AnimationController _cam = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 850),
+  )..addListener(_applyCameraFrame);
+  Offset _camFromFocus = Offset.zero;
+  Offset _camToFocus = Offset.zero;
+  double _camFromScale = 1;
+  double _camToScale = 1;
+
+  /// A target smaller than this on screen (longest side, px) makes the
+  /// camera zoom in a little so the animation can actually be seen.
+  static const double _minTargetPx = 70;
+
   @override
   void initState() {
     super.initState();
@@ -140,6 +191,10 @@ class _MapScreenState extends State<MapScreen> {
     _players.dispose();
     _controller.dispose();
     _transform.dispose();
+    _pulse.dispose();
+    _fx.dispose();
+    _popupAnim.dispose();
+    _cam.dispose();
     super.dispose();
   }
 
@@ -238,6 +293,7 @@ class _MapScreenState extends State<MapScreen> {
       final owner = players[state.ownerId];
       if (owner != null) colors[id] = owner.color.withAlpha(_ownerFillAlpha);
     });
+    colors.addAll(_colorOverrides);
     return colors;
   }
 
@@ -355,13 +411,89 @@ class _MapScreenState extends State<MapScreen> {
     return links;
   }
 
-  /// Opens the battle window against [target].
-  void _openAttack(Province target) {
-    showDialog<void>(
+  /// The map point at the middle of the screen right now.
+  Offset _currentFocus() {
+    final m = _transform.value;
+    final scale = m.getMaxScaleOnAxis();
+    return Offset(
+      (_viewport.width / 2 - m.storage[12]) / scale,
+      (_viewport.height / 2 - m.storage[13]) / scale,
+    );
+  }
+
+  void _applyCameraFrame() {
+    if (_viewport.isEmpty) return;
+    final t = Curves.easeInOutCubic.transform(_cam.value);
+    final scale = _camFromScale * pow(_camToScale / _camFromScale, t);
+    final focus = Offset.lerp(_camFromFocus, _camToFocus, t)!;
+    _transform.value = Matrix4.identity()
+      ..translate(
+        _viewport.width / 2 - focus.dx * scale,
+        _viewport.height / 2 - focus.dy * scale,
+      )
+      ..scale(scale);
+  }
+
+  /// Smoothly moves the camera so [focus] (map coordinates) is centered,
+  /// zooming in only if [minScale] asks for more than the current zoom.
+  Future<void> _panTo(Offset focus, {double minScale = 0}) async {
+    if (_viewport.isEmpty) return;
+    final minZoom = _minScaleFor(_viewport);
+    final maxZoom = max(_maxScale, minZoom * 14);
+    final current = _transform.value.getMaxScaleOnAxis();
+    final scale = max(current, minScale).clamp(minZoom, maxZoom).toDouble();
+
+    // Keep the view inside the pannable area, like the initial fit does.
+    final map = _controller.mapSize;
+    double clampAxis(double v, double lo, double hi) =>
+        lo > hi ? (lo + hi) / 2 : v.clamp(lo, hi).toDouble();
+    final halfW = _viewport.width / scale / 2;
+    final halfH = _viewport.height / scale / 2;
+    final target = Offset(
+      clampAxis(focus.dx, -_boundaryMargin + halfW,
+          map.width + _boundaryMargin - halfW),
+      clampAxis(focus.dy, -_boundaryMargin + halfH,
+          map.height + _boundaryMargin - halfH),
+    );
+
+    _camFromFocus = _currentFocus();
+    _camToFocus = target;
+    _camFromScale = current;
+    _camToScale = scale;
+    await _cam.forward(from: 0);
+  }
+
+  /// Centers the camera on the fight: the target and the provinces that
+  /// border it from the attacker's side.
+  Future<void> _panToWarZone(Province target, Set<String> fighterIds) {
+    final border = _controller.neighborsOf(target.id);
+    var zone = target.bounds;
+    var any = false;
+    for (final id in fighterIds) {
+      if (!border.contains(id)) continue;
+      final p = _controller.provinceById(id);
+      if (p == null) continue;
+      zone = zone.expandToInclude(p.bounds);
+      any = true;
+    }
+    // Barracks far behind the front don't pull the camera away.
+    if (!any) zone = target.bounds;
+
+    final current = _transform.value.getMaxScaleOnAxis();
+    final targetSide = max(target.bounds.longestSide, 1.0);
+    final wanted = _minTargetPx / targetSide;
+    return _panTo(zone.center, minScale: wanted > current ? wanted : 0);
+  }
+
+  /// Opens the battle preview against [target]. Confirming closes it and
+  /// hands back the ids of the fighting provinces; the fight itself then
+  /// plays on the map.
+  Future<void> _openAttack(Province target) async {
+    if (_battleRunning) return;
+    final fighters = await showDialog<Set<String>>(
       context: context,
       barrierDismissible: false,
       builder: (_) => AttackDialog(
-        gameId: widget.gameId,
         uid: _uid,
         targetId: target.id,
         targetName: target.name,
@@ -372,9 +504,221 @@ class _MapScreenState extends State<MapScreen> {
         },
         provinceStates: _provinceStates,
         players: _players,
-        firestore: _firestore,
       ),
     );
+    if (fighters == null || !mounted) return;
+    try {
+      await _runBattle(target, fighters);
+    } catch (e, st) {
+      debugPrint('Battle animation failed: $e');
+      debugPrintStack(stackTrace: st);
+      if (mounted) _endBattle();
+    }
+  }
+
+  /// Direction the attack comes from: from the middle of the fighting
+  /// provinces toward the target.
+  Offset _attackDirection(Province target, Iterable<String> fighterIds) {
+    final border = _controller.neighborsOf(target.id);
+    var ids = [for (final id in fighterIds) if (border.contains(id)) id];
+    if (ids.isEmpty) ids = fighterIds.toList();
+
+    var sum = Offset.zero;
+    var count = 0;
+    for (final id in ids) {
+      final p = _controller.provinceById(id);
+      if (p == null) continue;
+      sum += p.anchor;
+      count++;
+    }
+    if (count == 0) return const Offset(1, 0);
+    final from = sum / count.toDouble();
+    final delta = target.anchor - from;
+    return delta.distance < 0.001 ? const Offset(1, 0) : delta / delta.distance;
+  }
+
+  /// The defender's barracks that border [target] and so help defend it.
+  Set<String> _defenderSupportIds(Province target) {
+    final states = _provinceStates.value;
+    final defenderId = states[target.id]?.ownerId;
+    if (defenderId == null) return const {};
+    return {
+      for (final id in _controller.neighborsOf(target.id))
+        if (id != target.id &&
+            states[id]?.ownerId == defenderId &&
+            GameRules.supportsAttacks(states[id]!.buildingType))
+          id,
+    };
+  }
+
+  BattleView _battleView({
+    required Province target,
+    required Iterable<String> fighterIds,
+    required Iterable<String> defenderSupportIds,
+    required Color attackerColor,
+    required Color defenderColor,
+    required BattleOutcome outcome,
+  }) {
+    return BattleView(
+      attackerPaths: [
+        for (final id in fighterIds)
+          if (_controller.provinceById(id) != null)
+            _controller.provinceById(id)!.path,
+      ],
+      attackerColor: attackerColor,
+      targetPath: target.path,
+      defenderSupportPaths: [
+        for (final id in defenderSupportIds)
+          if (_controller.provinceById(id) != null)
+            _controller.provinceById(id)!.path,
+      ],
+      defenderColor: defenderColor,
+      outcome: outcome,
+      sweepDirection: _attackDirection(target, fighterIds),
+      fillAlpha: _ownerFillAlpha,
+    );
+  }
+
+  /// Runs the attack against the server and plays what happens on the map.
+  Future<void> _runBattle(Province target, Set<String> previewFighters) async {
+    final players = _players.value;
+    final states = _provinceStates.value;
+    final me = players[_uid];
+    final defender = players[states[target.id]?.ownerId];
+    final attackerColor = me?.color ?? ConqueraColors.accent;
+    final defenderColor = defender?.color ?? ConqueraColors.muted;
+    final messenger = ScaffoldMessenger.of(context);
+    final previewDefenders = _defenderSupportIds(target);
+
+    // Back to the map: outline everyone involved and freeze the target's
+    // current color until the animation has played.
+    _controller.clearSelection();
+    _popupAnim.stop();
+    _popupAnim.value = 0;
+    _popup = null;
+    _fx.value = 0;
+    _pulse.repeat(reverse: true);
+    setState(() {
+      _colorOverrides = {target.id: defenderColor.withAlpha(_ownerFillAlpha)};
+      _hiddenIds = const {};
+      _battle = _battleView(
+        target: target,
+        fighterIds: previewFighters,
+        defenderSupportIds: previewDefenders,
+        attackerColor: attackerColor,
+        defenderColor: defenderColor,
+        outcome: BattleOutcome.pending,
+      );
+    });
+
+    // Fly to the war zone while the attack goes to the server.
+    final pan = _panToWarZone(target, previewFighters);
+
+    final started = DateTime.now();
+    AttackResult? result;
+    String? error;
+    try {
+      result = await _firestore.attackProvince(
+        gameId: widget.gameId,
+        uid: _uid,
+        targetId: target.id,
+        neighborIds: _controller.neighborsOf(target.id),
+        supportLinks: _supportLinks(target),
+      );
+    } on GameActionException catch (e) {
+      error = e.message;
+    } catch (e) {
+      debugPrint('Attack failed: $e');
+      error = 'Something went wrong. Try again.';
+    }
+    // The animation starts once the camera has arrived (and the outlines have
+    // been on screen for a moment), even if the server was quick.
+    final wait =
+        const Duration(milliseconds: 900) - DateTime.now().difference(started);
+    if (error == null && !wait.isNegative) await Future<void>.delayed(wait);
+    await pan;
+    if (!mounted) return;
+    debugPrint('Battle result: won=${result?.won} error=$error');
+
+    if (result == null) {
+      _endBattle();
+      messenger.showSnackBar(
+        SnackBar(content: Text(error ?? 'Attack failed.')),
+      );
+      return;
+    }
+
+    final fighters = result.fighterIds.isEmpty
+        ? previewFighters
+        : result.fighterIds.toSet();
+
+    final defenders = result.defenderSupportIds.toSet();
+
+    if (result.won) {
+      setState(() {
+        _battle = _battleView(
+          target: target,
+          fighterIds: fighters,
+          defenderSupportIds: defenders,
+          attackerColor: attackerColor,
+          defenderColor: defenderColor,
+          outcome: BattleOutcome.won,
+        );
+      });
+      _fx.duration = const Duration(milliseconds: 1100);
+      await _fx.forward(from: 0);
+      if (!mounted) return;
+      // The target is ours now; keep it painted that way until the live data
+      // has caught up.
+      setState(() {
+        _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
+      });
+      _showPopup(target, 'annexed ', attackerColor);
+    } else {
+      setState(() {
+        _hiddenIds = {target.id};
+        _battle = _battleView(
+          target: target,
+          fighterIds: fighters,
+          defenderSupportIds: defenders,
+          attackerColor: attackerColor,
+          defenderColor: defenderColor,
+          outcome: BattleOutcome.lost,
+        );
+      });
+      _fx.duration = const Duration(milliseconds: 650);
+      await _fx.forward(from: 0);
+      if (!mounted) return;
+      setState(() => _hiddenIds = const {});
+      _showPopup(target, 'Failed to annex ', attackerColor);
+    }
+
+    // Keep the outlines up while the pop-up is read, then clear everything.
+    await _popupAnim.forward(from: 0);
+    if (!mounted) return;
+    _endBattle();
+  }
+
+  void _showPopup(Province target, String lead, Color nameColor) {
+    setState(() {
+      _popup = _Popup(
+        anchor: target.anchor,
+        lead: lead,
+        name: target.name,
+        nameColor: nameColor,
+      );
+    });
+  }
+
+  void _endBattle() {
+    _pulse.stop();
+    _fx.value = 0;
+    setState(() {
+      _battle = null;
+      _colorOverrides = const {};
+      _hiddenIds = const {};
+      _popup = null;
+    });
   }
 
   /// Opens the build / reinforce window for [province].
@@ -423,6 +767,66 @@ class _MapScreenState extends State<MapScreen> {
     if ((e.position - start).distance <= _tapSlop) {
       _controller.selectAt(e.localPosition);
     }
+  }
+
+  /// The floating text above the attacked territory: it rises a little, and
+  /// fades in and out. Follows the territory as the map is panned/zoomed.
+  Widget _popupWidget(_Popup popup) {
+    final t = _popupAnim.value;
+    final point = MatrixUtils.transformPoint(_transform.value, popup.anchor);
+    final rise = 10 + 26 * Curves.easeOut.transform(t.clamp(0.0, 1.0).toDouble());
+    final opacity = t < 0.12
+        ? t / 0.12
+        : (t > 0.75 ? (1 - (t - 0.75) / 0.25) : 1.0);
+    final scale = 0.85 + 0.15 * Curves.easeOutBack.transform(min(1.0, t / 0.15));
+
+    return Stack(
+      children: [
+        Positioned(
+          left: point.dx,
+          top: point.dy - rise,
+          child: FractionalTranslation(
+            translation: const Offset(-0.5, -1),
+            child: Opacity(
+              opacity: opacity.clamp(0.0, 1.0).toDouble(),
+              child: Transform.scale(
+                scale: scale,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: ConqueraSpace.md,
+                    vertical: ConqueraSpace.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: ConqueraColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ConqueraColors.divider),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x33000000),
+                        blurRadius: 8,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Text.rich(
+                    TextSpan(
+                      style: ConqueraText.name,
+                      children: [
+                        TextSpan(text: popup.lead),
+                        TextSpan(
+                          text: popup.name,
+                          style: TextStyle(color: popup.nameColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   /// Whether the left menu is open (the world blurs behind it).
@@ -486,6 +890,7 @@ class _MapScreenState extends State<MapScreen> {
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final viewport = constraints.biggest;
+                          _viewport = viewport;
                           if (_fittedFor != viewport) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               if (mounted) _fitToViewport(viewport);
@@ -518,9 +923,24 @@ class _MapScreenState extends State<MapScreen> {
                                         painter: MapPainter(
                                           provinces: _controller.provinces,
                                           ownerFillColors: _ownerFillColors(),
+                                          hiddenIds: _hiddenIds,
                                         ),
                                       ),
                                     ),
+                                    if (_battle != null)
+                                      IgnorePointer(
+                                        child: RepaintBoundary(
+                                          child: CustomPaint(
+                                            size: _controller.mapSize,
+                                            painter: BattlePainter(
+                                              view: _battle!,
+                                              pulse: _pulse,
+                                              fx: _fx,
+                                              transform: _transform,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     IgnorePointer(
                                       child: RepaintBoundary(
                                         child: CustomPaint(
@@ -559,6 +979,15 @@ class _MapScreenState extends State<MapScreen> {
                         },
                       ),
                     ),
+                    if (_popup != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedBuilder(
+                            animation: Listenable.merge([_popupAnim, _transform]),
+                            builder: (context, _) => _popupWidget(_popup!),
+                          ),
+                        ),
+                      ),
                     Positioned(
                       top: 0,
                       left: 0,
@@ -603,4 +1032,20 @@ class _MapScreenState extends State<MapScreen> {
       ),
     );
   }
+}
+
+/// Text floating above an attacked territory: [lead] in ink, then the
+/// territory [name] in the attacker's color.
+class _Popup {
+  final Offset anchor;
+  final String lead;
+  final String name;
+  final Color nameColor;
+
+  const _Popup({
+    required this.anchor,
+    required this.lead,
+    required this.name,
+    required this.nameColor,
+  });
 }

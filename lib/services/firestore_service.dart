@@ -352,15 +352,18 @@ class FirestoreService {
   /// by the caller); the transaction re-checks ownership and the building.
   ///
   /// Attacker power X = the troops of everyone fighting added together;
-  /// defender power Y = the target's troops, times 1.5 if it has a fortress.
+  /// defender power Y = the target's troops (times 1.5 if it has a fortress)
+  /// plus the troops of the defender's barracks that border the target.
   /// No luck: if X > Y the attacker wins, otherwise (a tie included) the
   /// defender holds.
   ///
-  /// Win: the leftover X - Y is spread evenly over everyone who fought and
-  /// the annexed province, which changes hands. Any building on it is
-  /// destroyed.
-  /// Loss: everyone who fought loses all their power, and the defender loses
-  /// the same amount (down to 0).
+  /// Win: the leftover X - Y is spread over everyone who fought and the
+  /// annexed province (which changes hands) in proportion to the troops each
+  /// had before, so the ratios between them are kept. Any building on the
+  /// annexed province is destroyed.
+  /// The defending barracks lose all their troops. Loss: everyone who fought
+  /// loses all their power, and the defence loses the same amount, spread
+  /// over the target and its barracks in proportion to their troops.
   /// Either way the attacker's cooldown starts.
   ///
   /// Throws [GameActionException] if the attack isn't allowed.
@@ -468,10 +471,25 @@ class FirestoreService {
         return;
       }
 
+      // The defender's barracks that border the target send their troops to
+      // defend it (the mirror of the attacker's barracks).
+      final defenderSupporters = [
+        for (final snap in borderSnaps)
+          if (snap.exists &&
+              snap.data()?['ownerId'] == defenderId &&
+              GameRules.supportsAttacks(_buildingTypeOf(snap.data())))
+            snap,
+      ];
+      var supportPower = 0.0;
+      for (final snap in defenderSupporters) {
+        supportPower += (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+      }
+
       final defenseMultiplier =
           GameRules.defenseMultiplier(_buildingTypeOf(targetData));
       final defenderRaw = (targetData?['troops'] as num?)?.toDouble() ?? 0;
-      final defenderPower = defenderRaw * defenseMultiplier;
+      // The fortress bonus only applies to the target's own troops.
+      final defenderPower = defenderRaw * defenseMultiplier + supportPower;
 
       // Pure subtraction, no luck. A tie goes to the defender.
       final won = attackerPower > defenderPower;
@@ -480,11 +498,24 @@ class FirestoreService {
       final stamp = FieldValue.serverTimestamp();
 
       if (won) {
-        // What is left after the fight (X - Y) is shared evenly between the
-        // fighters and the annexed province.
-        final share = (attackerPower - defenderPower) / (fighters.length + 1);
+        // What is left after the fight (X - Y) is shared between the fighters
+        // and the annexed province in proportion to the troops each one had,
+        // so a strong province stays strong and a weak one stays weak. The
+        // annexed province counts with the troops it had before the attack
+        // (without any fortress bonus).
+        final leftover = attackerPower - defenderPower;
+        final totalWeight = attackerPower + defenderRaw;
         for (final snap in fighters) {
-          tx.update(snap.reference, {'troops': share, 'troopsUpdatedAt': stamp});
+          final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+          tx.update(snap.reference, {
+            'troops': leftover * had / totalWeight,
+            'troopsUpdatedAt': stamp,
+          });
+        }
+        final annexedTroops = leftover * defenderRaw / totalWeight;
+        // The defending barracks committed everything and lost it.
+        for (final snap in defenderSupporters) {
+          tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
         }
 
         // The building does not survive the invasion. A gold mine therefore
@@ -493,7 +524,7 @@ class FirestoreService {
         final mineDelta = _hasGoldMine(targetData) ? 1 : 0;
         tx.update(targetRef, {
           'ownerId': uid,
-          'troops': share,
+          'troops': annexedTroops,
           'troopsUpdatedAt': stamp,
           'building': {'type': 'none', 'level': 0},
         });
@@ -522,18 +553,28 @@ class FirestoreService {
           won: true,
           attackerPower: attackerPower,
           defenderPower: defenderPower,
-          attackerProvinceCount: fighters.length,
-          powerAfter: share,
+          fighterIds: [for (final s in fighters) s.id],
+          defenderSupportIds: [for (final s in defenderSupporters) s.id],
+          powerAfter: leftover,
           defenderPowerLeft: 0,
           buildingDestroyed: hadBuilding,
         );
       } else {
-        // The defender's lost power is taken off its boosted power, then
-        // converted back (so a fortress doesn't inflate what is left).
-        final left =
-            max(0.0, defenderPower - attackerPower) / defenseMultiplier;
+        // The defence loses the attacker's power, spread over the target and
+        // the supporting barracks in proportion to what each one had (so a
+        // fortress doesn't inflate what is left).
+        final remaining = max(0.0, defenderPower - attackerPower);
+        final keep = defenderPower <= 0 ? 0.0 : remaining / defenderPower;
+        final left = defenderRaw * keep;
         for (final snap in fighters) {
           tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
+        }
+        for (final snap in defenderSupporters) {
+          final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+          tx.update(snap.reference, {
+            'troops': had * keep,
+            'troopsUpdatedAt': stamp,
+          });
         }
         tx.update(targetRef, {'troops': left, 'troopsUpdatedAt': stamp});
         tx.update(attackerRef, {'lastAttackAt': attackedAt});
@@ -542,7 +583,8 @@ class FirestoreService {
           won: false,
           attackerPower: attackerPower,
           defenderPower: defenderPower,
-          attackerProvinceCount: fighters.length,
+          fighterIds: [for (final s in fighters) s.id],
+          defenderSupportIds: [for (final s in defenderSupporters) s.id],
           powerAfter: 0,
           defenderPowerLeft: left,
         );

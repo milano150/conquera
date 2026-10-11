@@ -1,4 +1,5 @@
-/// What happened in one attack, handed back to the battle window.
+/// What happened in one attack, handed back to the map screen so it can play
+/// the right animation.
 class AttackResult {
   final bool won;
 
@@ -9,13 +10,19 @@ class AttackResult {
   final double attackerPower;
   final double defenderPower;
 
-  /// How many of the attacker's provinces took part (bordering ones plus
-  /// barracks support).
-  final int attackerProvinceCount;
+  /// The attacker's provinces that took part (bordering ones plus barracks
+  /// support).
+  final List<String> fighterIds;
 
-  /// Win: power each of the attacker's provinces (and the annexed one)
-  /// holds after the leftover power (attacker minus defender) is spread
-  /// evenly. Loss: 0.
+  /// The defender's barracks that helped defend the target.
+  final List<String> defenderSupportIds;
+
+  /// How many of the attacker's provinces took part.
+  int get attackerProvinceCount => fighterIds.length;
+
+  /// Win: the power left over (attacker minus defender), which is shared
+  /// between the fighters and the annexed province in proportion to the
+  /// troops each of them had. Loss: 0.
   final double powerAfter;
 
   /// Loss: power the defending province still has. Win: 0.
@@ -28,7 +35,8 @@ class AttackResult {
     required this.won,
     required this.attackerPower,
     required this.defenderPower,
-    required this.attackerProvinceCount,
+    required this.fighterIds,
+    this.defenderSupportIds = const [],
     required this.powerAfter,
     required this.defenderPowerLeft,
     this.buildingDestroyed = false,

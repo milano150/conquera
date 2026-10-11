@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -14,6 +16,10 @@ class MapPainter extends CustomPainter {
 
   /// provinceId -> color drawn over the land fill. Missing = neutral.
   final Map<String, Color> ownerFillColors;
+
+  /// Provinces left out of this layer (the battle layer draws them itself,
+  /// e.g. while one shakes).
+  final Set<String> hiddenIds;
   final Color fillColor;
   final Color strokeColor;
   final double strokeWidth;
@@ -21,6 +27,7 @@ class MapPainter extends CustomPainter {
   MapPainter({
     required this.provinces,
     this.ownerFillColors = const <String, Color>{},
+    this.hiddenIds = const <String>{},
     this.fillColor = ConqueraColors.land,
     this.strokeColor = ConqueraColors.border,
     this.strokeWidth = 0.5,
@@ -40,6 +47,7 @@ class MapPainter extends CustomPainter {
       ..strokeWidth = strokeWidth;
 
     for (final province in provinces) {
+      if (hiddenIds.contains(province.id)) continue;
       canvas.drawPath(province.path, fillPaint);
 
       final ownerColor = ownerFillColors[province.id];
@@ -60,6 +68,7 @@ class MapPainter extends CustomPainter {
   bool shouldRepaint(covariant MapPainter oldDelegate) {
     return oldDelegate.provinces.length != provinces.length ||
         !mapEquals(oldDelegate.ownerFillColors, ownerFillColors) ||
+        !setEquals(oldDelegate.hiddenIds, hiddenIds) ||
         oldDelegate.fillColor != fillColor ||
         oldDelegate.strokeColor != strokeColor ||
         oldDelegate.strokeWidth != strokeWidth;
@@ -103,6 +112,196 @@ class SelectionPainter extends CustomPainter {
     return !identical(oldDelegate.path, path) || oldDelegate.scale != scale;
   }
 }
+/// 0..1 opacity as a 0..255 alpha.
+int _alpha(double opacity) => min(255, max(0, (opacity * 255).round()));
+
+/// How a battle ended, as far as the battle layer is concerned.
+enum BattleOutcome { pending, won, lost }
+
+/// Everything the [BattlePainter] needs to know about the running battle.
+class BattleView {
+  /// The attacker's provinces that take part, outlined in [attackerColor].
+  final List<Path> attackerPaths;
+  final Color attackerColor;
+
+  /// The province under attack, outlined in [defenderColor], along with the
+  /// defender's barracks that help defend it.
+  final Path targetPath;
+  final List<Path> defenderSupportPaths;
+  final Color defenderColor;
+
+  final BattleOutcome outcome;
+
+  /// Unit vector pointing from the attackers toward the target: the way the
+  /// sweep travels when the attack is won.
+  final Offset sweepDirection;
+
+  /// Opacity of the owner fill (0-255), so the sweep matches the map.
+  final int fillAlpha;
+
+  const BattleView({
+    required this.attackerPaths,
+    required this.attackerColor,
+    required this.targetPath,
+    this.defenderSupportPaths = const [],
+    required this.defenderColor,
+    required this.outcome,
+    required this.sweepDirection,
+    required this.fillAlpha,
+  });
+}
+
+/// The battle layer, drawn between the base map and the badges:
+///  * the borders of every involved province (the attacker's in its color,
+///    the defender's in its color), gently pulsing;
+///  * on a win, a circle that grows over the target from the side the attack
+///    comes from ([BattleView.sweepDirection]), turning it from the defender's
+///    color to the attacker's;
+///  * on a loss, a shake of the target (the base layer hides it meanwhile).
+///
+/// [fx] runs 0..1 for the sweep or the shake. [pulse] drives the outline.
+/// Line widths are divided by the zoom so they stay the same on screen.
+class BattlePainter extends CustomPainter {
+  final BattleView view;
+  final Animation<double> pulse;
+  final Animation<double> fx;
+  final TransformationController transform;
+
+  static const double _casingPx = 4.6;
+  static const double _corePx = 2.6;
+  static const double _shakePx = 5;
+
+  BattlePainter({
+    required this.view,
+    required this.pulse,
+    required this.fx,
+    required this.transform,
+  }) : super(repaint: Listenable.merge([pulse, fx, transform]));
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scale = transform.value.getMaxScaleOnAxis();
+    if (scale <= 0) return;
+
+    var shift = Offset.zero;
+    final t = fx.value;
+
+    if (view.outcome == BattleOutcome.won && t > 0) {
+      _paintSweep(canvas, scale, t);
+    } else if (view.outcome == BattleOutcome.lost) {
+      // Damped wobble: 5 swings, fading out.
+      final wobble = sin(t * pi * 10) * (1 - t) * _shakePx / scale;
+      shift = Offset(wobble, 0);
+      _paintShakenTarget(canvas, shift);
+    }
+
+    final alpha = 0.6 + 0.4 * pulse.value;
+    for (final path in view.attackerPaths) {
+      _outline(canvas, path, view.attackerColor, scale, alpha);
+    }
+    for (final path in view.defenderSupportPaths) {
+      _outline(canvas, path, view.defenderColor, scale, alpha);
+    }
+    _outline(
+      canvas,
+      view.targetPath.shift(shift),
+      view.defenderColor,
+      scale,
+      alpha,
+    );
+  }
+
+  void _outline(Canvas canvas, Path path, Color color, double scale, double a) {
+    Paint line(Color c, double px) => Paint()
+      ..style = PaintingStyle.stroke
+      ..isAntiAlias = true
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round
+      ..color = c
+      ..strokeWidth = px / scale;
+
+    canvas.drawPath(path, line(ConqueraColors.ink.withAlpha(_alpha(a)), _casingPx));
+    canvas.drawPath(path, line(color.withAlpha(_alpha(a)), _corePx));
+  }
+
+  /// The target as the base layer would draw it, but moved by [shift].
+  void _paintShakenTarget(Canvas canvas, Offset shift) {
+    final path = view.targetPath.shift(shift);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.fill
+        ..color = ConqueraColors.land,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.fill
+        ..color = view.defenderColor.withAlpha(view.fillAlpha),
+    );
+  }
+
+  /// Paints the attacker's color over the target as a circle that grows out
+  /// of the side the attack comes from, like an expanding arc: its center is
+  /// where the attackers meet the target's edge, and it ends up large enough
+  /// to cover the whole territory, however big or small that is.
+  void _paintSweep(Canvas canvas, double scale, double t) {
+    final bounds = view.targetPath.getBounds();
+    var d = view.sweepDirection;
+    if (d.distance == 0) d = const Offset(1, 0);
+    d = d / d.distance;
+
+    // Entry point: the edge of the target's box facing the attackers.
+    final halfExtent =
+        d.dx.abs() * bounds.width / 2 + d.dy.abs() * bounds.height / 2;
+    final entry = bounds.center - d * halfExtent;
+
+    // Radius that reaches the farthest corner of the target.
+    var maxRadius = 0.0;
+    for (final corner in [
+      bounds.topLeft,
+      bounds.topRight,
+      bounds.bottomLeft,
+      bounds.bottomRight,
+    ]) {
+      maxRadius = max(maxRadius, (corner - entry).distance);
+    }
+    maxRadius *= 1.03;
+    if (maxRadius <= 0) return;
+
+    final progress = t.clamp(0.0, 1.0).toDouble();
+    final eased = Curves.easeInOutSine.transform(progress);
+    final radius = maxRadius * eased;
+    if (radius <= 0) return;
+
+    // Solid color all the way to the rim: blank the old owner's color, then
+    // lay the new one on top, both inside the growing circle.
+    canvas.save();
+    canvas.clipPath(Path()..addOval(Rect.fromCircle(center: entry, radius: radius)));
+    canvas.drawPath(
+      view.targetPath,
+      Paint()
+        ..style = PaintingStyle.fill
+        ..color = ConqueraColors.land,
+    );
+    canvas.drawPath(
+      view.targetPath,
+      Paint()
+        ..style = PaintingStyle.fill
+        ..color = view.attackerColor.withAlpha(view.fillAlpha),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant BattlePainter oldDelegate) {
+    return !identical(oldDelegate.view, view) ||
+        !identical(oldDelegate.pulse, pulse) ||
+        !identical(oldDelegate.fx, fx) ||
+        !identical(oldDelegate.transform, transform);
+  }
+}
+
 /// One thing to draw on top of a province: its building icon and/or its
 /// power. Plain data, so the painter can tell cheaply whether anything
 /// changed.
