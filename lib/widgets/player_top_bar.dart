@@ -134,14 +134,16 @@ class _GoldReadout extends StatelessWidget {
     return buffer.toString();
   }
 
-  static String _trim(double v) =>
-      v % 1 == 0 ? v.toInt().toString() : v.toStringAsFixed(1);
+  static String _trim(double v) {
+    if (v % 1 == 0) return v.toInt().toString();
+    return v.toStringAsFixed(v >= 10 ? 0 : (v >= 1 ? 1 : 2));
+  }
 
-  /// Slow idle rates read better per minute than as 0.1/s.
+  /// Slow idle rates read better per minute (or per hour) than as 0.01/s.
   static String _rateLabel(double perSecond) {
-    return perSecond >= 1
-        ? '+${_trim(perSecond)}/s'
-        : '+${_trim(perSecond * 60)}/min';
+    if (perSecond >= 1) return '+${_trim(perSecond)}/s';
+    if (perSecond * 60 >= 1) return '+${_trim(perSecond * 60)}/min';
+    return '+${_trim(perSecond * 3600)}/hr';
   }
 
   @override

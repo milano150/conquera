@@ -85,7 +85,10 @@ class _AttackDialogState extends State<AttackDialog> {
     for (final id in widget.neighborIds) {
       final state = states[id];
       if (state != null && state.ownerId == widget.uid) {
+        // Still counts as a bordering province a barracks can link to, but
+        // with only 1 power it doesn't fight.
         ownedBorders.add(id);
+        if (!GameRules.canAct(state.troops)) continue;
         fighters.add(id);
         power += state.troops;
         direct.add((
@@ -101,6 +104,7 @@ class _AttackDialogState extends State<AttackDialog> {
       if (state == null || state.ownerId != widget.uid) return;
       if (!GameRules.supportsAttacks(state.buildingType)) return;
       if (!links.any(ownedBorders.contains)) return;
+      if (!GameRules.canAct(state.troops)) return;
       fighters.add(id);
       power += state.troops;
       support.add((

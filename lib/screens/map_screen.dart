@@ -85,7 +85,7 @@ class _MapScreenState extends State<MapScreen>
 
   /// Power numbers appear once the map is zoomed in to this many times the
   /// most zoomed-out view. Higher = you have to zoom in further.
-  static const double _powerZoomFactor = 1.5;
+  static const double _powerZoomFactor = 1.3;
 
   /// Building icons and power numbers have a fixed size in MAP units (they
   /// scale with the map like the countries do). These are how big they look
@@ -136,6 +136,16 @@ class _MapScreenState extends State<MapScreen>
 
   /// Provinces the base layer skips (the battle layer draws them).
   Set<String> _hiddenIds = const {};
+
+  /// Troop counts shown on the map while a battle or claim plays, so the
+  /// new numbers (the split) only appear once the sweep has finished.
+  /// Empty = show the live numbers. A province missing from a non-empty map
+  /// shows 0 (e.g. the territory being claimed).
+  Map<String, double> _frozenTroops = const {};
+
+  Map<String, double> _snapshotTroops() => {
+        for (final e in _provinceStates.value.entries) e.key: e.value.troops,
+      };
 
   /// Pulse of the outlines (repeats while the battle is shown).
   late final AnimationController _pulse = AnimationController(
@@ -334,7 +344,10 @@ class _MapScreenState extends State<MapScreen>
       final icon = state.hasBuilding
           ? GameRules.buildingById(state.buildingType)?.icon
           : null;
-      final power = state.troops.floor();
+      final power = (_frozenTroops.isEmpty
+              ? state.troops
+              : (_frozenTroops[id] ?? 0))
+          .floor();
       if (icon == null && power <= 0) return;
 
       badges.add(
@@ -348,6 +361,22 @@ class _MapScreenState extends State<MapScreen>
       );
     });
     return badges;
+  }
+
+  /// False when none of the player's provinces that would take part holds
+  /// more than 1 power: a province with only 1 power can't attack or claim.
+  /// A claim uses the bordering provinces (a barracks can pay for it); an
+  /// attack also counts the barracks that join it.
+  bool _canSplitPower(Province target, {required bool claim}) {
+    final states = _provinceStates.value;
+    final ids = {
+      ..._myBorderingIds(target),
+      if (!claim) ..._supportLinks(target).keys,
+    };
+    return ids.any((id) {
+      final s = states[id];
+      return s != null && GameRules.canAct(s.troops);
+    });
   }
 
   /// Ids of the provinces the local player owns that border [target].
@@ -426,6 +455,7 @@ class _MapScreenState extends State<MapScreen>
     setState(() {
       // Keep the land looking unclaimed until the sweep reaches it.
       _colorOverrides = {target.id: Colors.transparent};
+      _frozenTroops = _snapshotTroops();
       _hiddenIds = const {};
       _battle = _battleView(
         target: target,
@@ -480,6 +510,7 @@ class _MapScreenState extends State<MapScreen>
     if (!mounted) return;
     setState(() {
       _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
+      _frozenTroops = const {}; // the troops split now
     });
     _showPopup(target, 'annexed ', attackerColor);
 
@@ -684,6 +715,7 @@ class _MapScreenState extends State<MapScreen>
     _pulse.repeat(reverse: true);
     setState(() {
       _colorOverrides = {target.id: defenderColor.withAlpha(_ownerFillAlpha)};
+      _frozenTroops = _snapshotTroops();
       _hiddenIds = const {};
       _battle = _battleView(
         target: target,
@@ -753,9 +785,10 @@ class _MapScreenState extends State<MapScreen>
       await _fx.forward(from: 0);
       if (!mounted) return;
       // The target is ours now; keep it painted that way until the live data
-      // has caught up.
+      // has caught up. The troops split now that the sweep is done.
       setState(() {
         _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
+        _frozenTroops = const {};
       });
       _showPopup(target, 'annexed ', attackerColor);
     } else {
@@ -773,7 +806,10 @@ class _MapScreenState extends State<MapScreen>
       _fx.duration = const Duration(milliseconds: 650);
       await _fx.forward(from: 0);
       if (!mounted) return;
-      setState(() => _hiddenIds = const {});
+      setState(() {
+        _hiddenIds = const {};
+        _frozenTroops = const {};
+      });
       _showPopup(target, 'Failed to annex ', attackerColor);
     }
 
@@ -800,6 +836,7 @@ class _MapScreenState extends State<MapScreen>
     setState(() {
       _battle = null;
       _colorOverrides = const {};
+      _frozenTroops = const {};
       _hiddenIds = const {};
       _popup = null;
     });
@@ -814,6 +851,7 @@ class _MapScreenState extends State<MapScreen>
         uid: _uid,
         provinceId: province.id,
         provinceName: province.name,
+        borderCount: _controller.neighborsOf(province.id).length,
         provinceStates: _provinceStates,
         players: _players,
         firestore: _firestore,
@@ -979,6 +1017,9 @@ class _MapScreenState extends State<MapScreen>
                 final canAttack = selected != null &&
                     (isEnemy || isUnclaimed) &&
                     _myBorderingIds(selected).isNotEmpty;
+                final canSplit = selected == null ||
+                    !canAttack ||
+                    _canSplitPower(selected, claim: isUnclaimed);
                 final attackReadyAt = _players.value[_uid]?.attackReadyAt;
 
                 return Stack(
@@ -1121,6 +1162,7 @@ class _MapScreenState extends State<MapScreen>
                                 isEnemy: isEnemy,
                                 isUnclaimed: isUnclaimed,
                                 canAttack: canAttack,
+                                canSplit: canSplit,
                                 attackReadyAt: attackReadyAt,
                                 onAttack: () => _openAttack(selected),
                                 onClaim: () => _claim(selected),

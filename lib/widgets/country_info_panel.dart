@@ -34,6 +34,9 @@ class CountryInfoPanel extends StatelessWidget {
   /// or claim it).
   final bool canAttack;
 
+  /// False greys the Attack / Claim button out (no power to split).
+  final bool canSplit;
+
   /// When the attack cooldown ends (null or past = ready).
   final DateTime? attackReadyAt;
   final VoidCallback? onAttack;
@@ -51,6 +54,7 @@ class CountryInfoPanel extends StatelessWidget {
     this.isEnemy = false,
     this.isUnclaimed = false,
     this.canAttack = false,
+    this.canSplit = true,
     this.attackReadyAt,
     this.onAttack,
     this.onClaim,
@@ -130,7 +134,7 @@ class CountryInfoPanel extends StatelessWidget {
                     _ActionButton(
                       label: 'Attack',
                       color: ConqueraColors.danger,
-                      enabled: canAttack,
+                      enabled: canAttack && canSplit,
                       readyAt: attackReadyAt,
                       hint: canAttack ? null : 'Not bordering your land',
                       onPressed: onAttack,
@@ -144,7 +148,7 @@ class CountryInfoPanel extends StatelessWidget {
                           label: 'Claim',
                           price: GameRules.claimCost,
                           color: ConqueraColors.accent,
-                          enabled: true,
+                          enabled: canSplit,
                           readyAt: attackReadyAt,
                           hint: null,
                           onPressed: onClaim,

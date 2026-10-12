@@ -81,13 +81,22 @@ class FirestoreService {
   int _ownedCount(DocumentSnapshot<Map<String, dynamic>> playerSnap) =>
       (playerSnap.data()?['ownedCount'] as num?)?.toInt() ?? 0;
 
-  int _mineCount(DocumentSnapshot<Map<String, dynamic>> playerSnap) =>
-      (playerSnap.data()?['mineCount'] as num?)?.toInt() ?? 0;
+  /// Combined gold per second of all the player's buildings.
+  double _buildingIncome(DocumentSnapshot<Map<String, dynamic>> playerSnap) =>
+      (playerSnap.data()?['buildingIncome'] as num?)?.toDouble() ?? 0;
 
-  bool _hasGoldMine(Map<String, dynamic>? provinceData) {
+  /// Gold per second the building on this province makes (0 if none). A
+  /// market's output depends on the 'borders' count saved when it was built.
+  double _buildingIncomeOf(Map<String, dynamic>? provinceData) {
     final building = provinceData?['building'];
-    return building is Map && building['type'] == GameRules.goldMine.id;
+    if (building is! Map) return 0;
+    final def = GameRules.buildingById(building['type'] as String? ?? '');
+    if (def == null) return 0;
+    return def.incomeFor((building['borders'] as num?)?.toInt() ?? 0);
   }
+
+  double _troopsOf(DocumentSnapshot<Map<String, dynamic>> snap) =>
+      (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
 
   String _buildingTypeOf(Map<String, dynamic>? provinceData) {
     final building = provinceData?['building'];
@@ -101,20 +110,21 @@ class FirestoreService {
   Map<String, dynamic> _settledIncomeUpdate(
     DocumentSnapshot<Map<String, dynamic>> playerSnap, {
     required int owned,
-    required int mines,
+    required double buildingIncome,
     required DateTime now,
     double spend = 0,
   }) {
     final territories = owned < 0 ? 0 : owned;
-    final goldMines = mines < 0 ? 0 : mines;
+    // Repeated adding and subtracting can leave tiny float leftovers.
+    final income = buildingIncome < 1e-9 ? 0.0 : buildingIncome;
     return {
       'gold': PlayerState.fromDoc(playerSnap).goldAt(now) - spend,
       'goldUpdatedAt': FieldValue.serverTimestamp(),
       'ownedCount': territories,
-      'mineCount': goldMines,
+      'buildingIncome': income,
       'goldRate': GameRules.incomeRate(
         territories: territories,
-        goldMines: goldMines,
+        buildingIncome: income,
       ),
     };
   }
@@ -146,7 +156,7 @@ class FirestoreService {
       final previousOwnerId = provinceData?['ownerId'] as String?;
       if (previousOwnerId == uid) return; // already yours
 
-      final mineDelta = _hasGoldMine(provinceData) ? 1 : 0;
+      final incomeDelta = _buildingIncomeOf(provinceData);
 
       final newOwnerSnap = await tx.get(newOwnerRef);
       DocumentReference<Map<String, dynamic>>? previousOwnerRef;
@@ -175,7 +185,7 @@ class FirestoreService {
           _settledIncomeUpdate(
             newOwnerSnap,
             owned: _ownedCount(newOwnerSnap) + 1,
-            mines: _mineCount(newOwnerSnap) + mineDelta,
+            buildingIncome: _buildingIncome(newOwnerSnap) + incomeDelta,
             now: now,
           ),
         );
@@ -189,7 +199,7 @@ class FirestoreService {
           _settledIncomeUpdate(
             previousOwnerSnap,
             owned: _ownedCount(previousOwnerSnap) - 1,
-            mines: _mineCount(previousOwnerSnap) - mineDelta,
+            buildingIncome: _buildingIncome(previousOwnerSnap) - incomeDelta,
             now: now,
           ),
         );
@@ -198,8 +208,11 @@ class FirestoreService {
   }
 
   /// Builds [building] on a province the player owns: pays the price,
-  /// puts the building on the province, and (for a gold mine) raises the
-  /// player's income. Throws [GameActionException] if it isn't allowed.
+  /// puts the building on the province, and raises the player's income if
+  /// it makes gold. [borders] is how many countries border the province (a
+  /// market earns by it). Throws [GameActionException] if it isn't allowed,
+  /// including when the building doesn't fit the territory (a harbor on a
+  /// landlocked country, a rig off an island archipelago).
   ///
   /// NOTE: like [claimProvince], this runs on the client for now. It
   /// should move into a Cloud Function before real players use it.
@@ -208,6 +221,7 @@ class FirestoreService {
     required String provinceId,
     required String uid,
     required BuildingDef building,
+    required int borders,
   }) async {
     final provinceRef = _provincesRef(gameId).doc(provinceId);
     final playerRef = _playerRef(gameId, uid);
@@ -224,6 +238,9 @@ class FirestoreService {
       if (_buildingTypeOf(data) != 'none') {
         return 'This province already has a building.';
       }
+      if (!GameRules.canBuildHere(building, provinceId, borders: borders)) {
+        return "You can't build a ${building.name} in this territory.";
+      }
 
       final now = DateTime.now();
       final buildReadyAt = PlayerState.fromDoc(playerSnap).buildReadyAt;
@@ -234,17 +251,17 @@ class FirestoreService {
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
       if (gold < building.cost) return 'Not enough gold.';
 
-      final addsMine = building.id == GameRules.goldMine.id;
+      final addedIncome = building.incomeFor(borders);
 
       tx.update(provinceRef, {
-        'building': {'type': building.id, 'level': 1},
+        'building': {'type': building.id, 'level': 1, 'borders': borders},
       });
       tx.update(
         playerRef,
         _settledIncomeUpdate(
           playerSnap,
           owned: _ownedCount(playerSnap),
-          mines: _mineCount(playerSnap) + (addsMine ? 1 : 0),
+          buildingIncome: _buildingIncome(playerSnap) + addedIncome,
           now: now,
           spend: building.cost.toDouble(),
         ),
@@ -256,7 +273,7 @@ class FirestoreService {
   }
 
   /// Removes the building from a province the player owns. No refund. If it
-  /// was a gold mine, the player's income drops accordingly (gold earned so
+  /// made gold, the player's income drops accordingly (gold earned so
   /// far is settled first). Throws [GameActionException] if not allowed.
   Future<void> destroyBuilding({
     required String gameId,
@@ -279,7 +296,7 @@ class FirestoreService {
         return 'There is nothing to destroy here.';
       }
 
-      final removesMine = _hasGoldMine(data);
+      final removedIncome = _buildingIncomeOf(data);
 
       tx.update(provinceRef, {
         'building': {'type': 'none', 'level': 0},
@@ -289,7 +306,7 @@ class FirestoreService {
         ..._settledIncomeUpdate(
           playerSnap,
           owned: _ownedCount(playerSnap),
-          mines: _mineCount(playerSnap) - (removesMine ? 1 : 0),
+          buildingIncome: _buildingIncome(playerSnap) - removedIncome,
           now: now,
         ),
         // Starts the "can't build yet" cooldown.
@@ -347,7 +364,9 @@ class FirestoreService {
   ///
   /// Who fights: every province [uid] owns among [neighborIds] (the target's
   /// bordering provinces), plus every barracks province [uid] owns that
-  /// borders one of those. [supportLinks] maps each candidate barracks
+  /// borders one of those. A province with only 1 power ([GameRules.canAct])
+  /// never fights: it is left untouched, though it still counts as a
+  /// bordering province that a barracks can link to. [supportLinks] maps each candidate barracks
   /// province to the provinces it borders (worked out from the map geometry
   /// by the caller); the transaction re-checks ownership and the building.
   ///
@@ -357,13 +376,14 @@ class FirestoreService {
   /// No luck: if X > Y the attacker wins, otherwise (a tie included) the
   /// defender holds.
   ///
-  /// Win: the leftover X - Y is spread over everyone who fought and the
-  /// annexed province (which changes hands) in proportion to the troops each
-  /// had before, so the ratios between them are kept. Any building on the
-  /// annexed province is destroyed.
+  /// Win: the leftover X - Y is normalized: split equally between every
+  /// province that fought and the annexed province (which changes hands),
+  /// except barracks, which only supplied troops and end up empty. Any
+  /// building on the annexed province is destroyed.
   /// The defending barracks lose all their troops. Loss: everyone who fought
-  /// loses all their power, and the defence loses the same amount, spread
-  /// over the target and its barracks in proportion to their troops.
+  /// loses [GameRules.failedAttackLossShare] of their troops, and the
+  /// defence loses the same total amount, spread over the target and its
+  /// barracks in proportion to their troops.
   /// Either way the attacker's cooldown starts.
   ///
   /// Throws [GameActionException] if the attack isn't allowed.
@@ -457,18 +477,24 @@ class FirestoreService {
         final data = snap.data();
         if (!snap.exists || data?['ownerId'] != uid) continue;
         if (!GameRules.supportsAttacks(_buildingTypeOf(data))) continue;
+        if (!GameRules.canAct(_troopsOf(snap))) continue;
         final links = supportLinks[supportIds[i]] ?? const <String>{};
         if (links.any(borderingIds.contains)) supporters.add(snap);
       }
-      final fighters = [...bordering, ...supporters];
+      // Provinces with only 1 power can't attack; they stay as they are.
+      final fighters = [
+        for (final snap in bordering)
+          if (GameRules.canAct(_troopsOf(snap))) snap,
+        ...supporters,
+      ];
+      if (fighters.isEmpty) {
+        error = "Provinces with only 1 power can't attack.";
+        return;
+      }
 
       var attackerPower = 0.0;
       for (final snap in fighters) {
-        attackerPower += (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
-      }
-      if (attackerPower <= 0) {
-        error = 'Your provinces taking part have no power to attack with.';
-        return;
+        attackerPower += _troopsOf(snap);
       }
 
       // The defender's barracks that border the target send their troops to
@@ -498,30 +524,35 @@ class FirestoreService {
       final stamp = FieldValue.serverTimestamp();
 
       if (won) {
-        // What is left after the fight (X - Y) is shared between the fighters
-        // and the annexed province in proportion to the troops each one had,
-        // so a strong province stays strong and a weak one stays weak. The
-        // annexed province counts with the troops it had before the attack
-        // (without any fortress bonus).
+        // What is left after the fight (X - Y) is normalized: split equally
+        // between the fighting provinces and the annexed one. Barracks are
+        // left out of the split; their troops were pooled into the attack,
+        // so they end up empty.
         final leftover = attackerPower - defenderPower;
-        final totalWeight = attackerPower + defenderRaw;
+        final receiverCount = fighters
+                .where((s) =>
+                    !GameRules.supportsAttacks(_buildingTypeOf(s.data())))
+                .length +
+            1; // + the annexed province
+        final share = leftover / receiverCount;
         for (final snap in fighters) {
-          final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+          final isBarracks =
+              GameRules.supportsAttacks(_buildingTypeOf(snap.data()));
           tx.update(snap.reference, {
-            'troops': leftover * had / totalWeight,
+            'troops': isBarracks ? 0 : share,
             'troopsUpdatedAt': stamp,
           });
         }
-        final annexedTroops = leftover * defenderRaw / totalWeight;
+        final annexedTroops = share;
         // The defending barracks committed everything and lost it.
         for (final snap in defenderSupporters) {
           tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
         }
 
-        // The building does not survive the invasion. A gold mine therefore
-        // is lost by the defender and never gained by the attacker.
+        // The building does not survive the invasion. Its income is
+        // therefore lost by the defender and never gained by the attacker.
         final hadBuilding = _buildingTypeOf(targetData) != 'none';
-        final mineDelta = _hasGoldMine(targetData) ? 1 : 0;
+        final incomeDelta = _buildingIncomeOf(targetData);
         tx.update(targetRef, {
           'ownerId': uid,
           'troops': annexedTroops,
@@ -532,7 +563,7 @@ class FirestoreService {
           ..._settledIncomeUpdate(
             attackerSnap,
             owned: _ownedCount(attackerSnap) + 1,
-            mines: _mineCount(attackerSnap),
+            buildingIncome: _buildingIncome(attackerSnap),
             now: now,
           ),
           'lastAttackAt': attackedAt,
@@ -543,7 +574,7 @@ class FirestoreService {
             _settledIncomeUpdate(
               defenderSnap,
               owned: _ownedCount(defenderSnap) - 1,
-              mines: _mineCount(defenderSnap) - mineDelta,
+              buildingIncome: _buildingIncome(defenderSnap) - incomeDelta,
               now: now,
             ),
           );
@@ -560,14 +591,20 @@ class FirestoreService {
           buildingDestroyed: hadBuilding,
         );
       } else {
-        // The defence loses the attacker's power, spread over the target and
-        // the supporting barracks in proportion to what each one had (so a
-        // fortress doesn't inflate what is left).
-        final remaining = max(0.0, defenderPower - attackerPower);
+        // Every fighter loses a share of its troops (75%); the defence loses
+        // the same total amount, spread over the target and the supporting
+        // barracks in proportion to what each one had (so a fortress doesn't
+        // inflate what is left).
+        final lost = attackerPower * GameRules.failedAttackLossShare;
+        final remaining = max(0.0, defenderPower - lost);
         final keep = defenderPower <= 0 ? 0.0 : remaining / defenderPower;
         final left = defenderRaw * keep;
         for (final snap in fighters) {
-          tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
+          final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+          tx.update(snap.reference, {
+            'troops': had * (1 - GameRules.failedAttackLossShare),
+            'troopsUpdatedAt': stamp,
+          });
         }
         for (final snap in defenderSupporters) {
           final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
@@ -585,7 +622,7 @@ class FirestoreService {
           defenderPower: defenderPower,
           fighterIds: [for (final s in fighters) s.id],
           defenderSupportIds: [for (final s in defenderSupporters) s.id],
-          powerAfter: 0,
+          powerAfter: attackerPower - lost,
           defenderPowerLeft: left,
         );
       }
@@ -603,6 +640,12 @@ class FirestoreService {
   /// geometry plus sea links); at least one must belong to [uid]. Counts as
   /// an attack: the attack cooldown starts. Throws [GameActionException] if
   /// it isn't allowed.
+  ///
+  /// Provinces with only 1 power can't claim. The new province's power comes
+  /// from the bordering non-barracks provinces with 2+ power (they split
+  /// equally with it). If there are none, a bordering barracks with 2+ power
+  /// gives it 1 power and keeps the rest (10 becomes 9). With neither, the
+  /// claim is refused.
   ///
   /// NOTE: runs on the client for now, like the other actions.
   Future<void> claimUnclaimedProvince({
@@ -643,16 +686,72 @@ class FirestoreService {
       );
       if (!bordersMine) return 'None of your provinces border this one.';
 
+      // Only provinces with 2+ power can claim (1 power stays as garrison).
+      final sharing = [
+        for (final snap in borderSnaps)
+          if (snap.exists &&
+              snap.data()?['ownerId'] == uid &&
+              !GameRules.supportsAttacks(_buildingTypeOf(snap.data())) &&
+              GameRules.canAct(_troopsOf(snap)))
+            snap,
+      ];
+      // No such province: a bordering barracks can pay for the claim instead.
+      DocumentSnapshot<Map<String, dynamic>>? barracks;
+      if (sharing.isEmpty) {
+        for (final snap in borderSnaps) {
+          if (!snap.exists ||
+              snap.data()?['ownerId'] != uid ||
+              !GameRules.supportsAttacks(_buildingTypeOf(snap.data())) ||
+              !GameRules.canAct(_troopsOf(snap))) {
+            continue;
+          }
+          if (barracks == null || _troopsOf(snap) > _troopsOf(barracks)) {
+            barracks = snap;
+          }
+        }
+        if (barracks == null) return "Provinces with only 1 power can't claim.";
+      }
+
       final cost = GameRules.claimCost;
       if (player.goldAt(now) < cost) return 'Not enough gold.';
 
+      final stamp = FieldValue.serverTimestamp();
+      final double share;
+      if (barracks != null) {
+        // The barracks keeps everything except the 1 power it hands over.
+        share = 1;
+        tx.update(barracks.reference, {
+          'troops': _troopsOf(barracks) - 1,
+          'troopsUpdatedAt': stamp,
+        });
+      } else {
+        // Normalize troops: the claiming provinces and the new province
+        // share their troops equally. Everyone has 2+ power, so each ends
+        // up with at least 1.
+        var pool = 0.0;
+        for (final snap in sharing) {
+          pool += _troopsOf(snap);
+        }
+        share = pool / (sharing.length + 1);
+        for (final snap in sharing) {
+          tx.update(snap.reference, {
+            'troops': share,
+            'troopsUpdatedAt': stamp,
+          });
+        }
+      }
+
       if (provinceSnap.exists) {
-        tx.update(provinceRef, {'ownerId': uid});
+        tx.update(provinceRef, {
+          'ownerId': uid,
+          'troops': share,
+          'troopsUpdatedAt': stamp,
+        });
       } else {
         tx.set(provinceRef, {
           'ownerId': uid,
-          'troops': 0,
-          'troopsUpdatedAt': FieldValue.serverTimestamp(),
+          'troops': share,
+          'troopsUpdatedAt': stamp,
           'building': {'type': 'none', 'level': 0},
         });
       }
@@ -660,7 +759,7 @@ class FirestoreService {
         ..._settledIncomeUpdate(
           playerSnap,
           owned: _ownedCount(playerSnap) + 1,
-          mines: _mineCount(playerSnap) + (_hasGoldMine(data) ? 1 : 0),
+          buildingIncome: _buildingIncome(playerSnap) + _buildingIncomeOf(data),
           now: now,
           spend: cost.toDouble(),
         ),
@@ -676,10 +775,11 @@ class FirestoreService {
   // Join / reconcile
   // ---------------------------------------------------------------------
 
-  /// Recounts the player's provinces and mines and fixes ownedCount /
-  /// mineCount / goldRate if they have drifted (or were created under an
-  /// older income rule, or the numbers in [GameRules] changed).
-  /// Runs on every launch, so stored income always matches ownership.
+  /// Recounts the player's provinces and the income of their buildings and
+  /// fixes ownedCount / buildingIncome / goldRate if they have drifted (or
+  /// were created under an older income rule, or the numbers in [GameRules]
+  /// changed). Runs on every launch, so stored income always matches
+  /// ownership.
   Future<void> _reconcileTerritoryIncome({
     required String gameId,
     required String uid,
@@ -689,32 +789,36 @@ class FirestoreService {
     final data = snap.data();
     if (data == null) return;
 
-    final mine = _provincesRef(gameId).where('ownerId', isEqualTo: uid);
-    final counts = await Future.wait([
-      mine.count().get(),
-      mine
-          .where('building.type', isEqualTo: GameRules.goldMine.id)
-          .count()
-          .get(),
-    ]);
-    final owned = counts[0].count ?? 0;
-    final mines = counts[1].count ?? 0;
+    final ownedDocs =
+        await _provincesRef(gameId).where('ownerId', isEqualTo: uid).get();
+    final owned = ownedDocs.docs.length;
+    var income = 0.0;
+    for (final doc in ownedDocs.docs) {
+      income += _buildingIncomeOf(doc.data());
+    }
 
     final storedCount = (data['ownedCount'] as num?)?.toInt();
-    final storedMines = (data['mineCount'] as num?)?.toInt();
+    final storedIncome = (data['buildingIncome'] as num?)?.toDouble();
     final storedRate = (data['goldRate'] as num?)?.toDouble();
     final expectedRate =
-        GameRules.incomeRate(territories: owned, goldMines: mines);
+        GameRules.incomeRate(territories: owned, buildingIncome: income);
     final inSync = storedCount == owned &&
-        storedMines == mines &&
+        storedIncome != null &&
+        (storedIncome - income).abs() < 1e-9 &&
         storedRate != null &&
         (storedRate - expectedRate).abs() < 1e-9;
     if (inSync) return;
 
     await ref.update(
-      _settledIncomeUpdate(snap, owned: owned, mines: mines, now: DateTime.now()),
+      _settledIncomeUpdate(
+        snap,
+        owned: owned,
+        buildingIncome: income,
+        now: DateTime.now(),
+      ),
     );
-    debugPrint('Income reconciled: $owned territories, $mines gold mines');
+    debugPrint('Income reconciled: $owned territories, '
+        '${income.toStringAsFixed(4)} gold/s from buildings');
   }
 
   /// True if a world with this id exists. Worlds are created by hand in the
@@ -733,8 +837,9 @@ class FirestoreService {
     return snap.exists;
   }
 
-  /// Re-checks a returning player's territory and gold-mine counts against
-  /// the provinces they actually own, fixing the income rate if it drifted.
+  /// Re-checks a returning player's territory count and building income
+  /// against the provinces they actually own, fixing the income rate if it
+  /// drifted.
   Future<void> reconcileIncome({
     required String gameId,
     required String uid,
@@ -796,8 +901,8 @@ class FirestoreService {
           'gold': GameRules.startingGold.toDouble(),
           'goldUpdatedAt': FieldValue.serverTimestamp(),
           'ownedCount': 1,
-          'mineCount': 0,
-          'goldRate': GameRules.incomeRate(territories: 1, goldMines: 0),
+          'buildingIncome': 0.0,
+          'goldRate': GameRules.incomeRate(territories: 1, buildingIncome: 0),
         });
         return true;
       });

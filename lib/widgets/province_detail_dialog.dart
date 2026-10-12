@@ -25,6 +25,10 @@ class ProvinceDetailDialog extends StatefulWidget {
   final String uid;
   final String provinceId;
   final String provinceName;
+
+  /// How many countries border this province (sea links included). A
+  /// market earns by it, and it hides the market if there are none.
+  final int borderCount;
   final ValueListenable<Map<String, ProvinceState>> provinceStates;
   final ValueListenable<Map<String, PlayerState>> players;
   final FirestoreService firestore;
@@ -35,6 +39,7 @@ class ProvinceDetailDialog extends StatefulWidget {
     required this.uid,
     required this.provinceId,
     required this.provinceName,
+    required this.borderCount,
     required this.provinceStates,
     required this.players,
     required this.firestore,
@@ -125,6 +130,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         provinceId: widget.provinceId,
         uid: widget.uid,
         building: building,
+        borders: widget.borderCount,
       ),
       'Built ${building.name}.',
     );
@@ -336,7 +342,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   _LockedField(text: province.buildingLabel),
                   const SizedBox(height: ConqueraSpace.sm),
                   _ActionRow(
-                    info: def?.effectLabel ?? '',
+                    info: def?.effectLabelFor(widget.borderCount) ?? '',
                     unaffordable: false,
                     button: OutlinedButton(
                       onPressed:
@@ -380,7 +386,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                 _Dropdown<BuildingDef>(
                   value: pending,
                   hint: 'Select building',
-                  items: GameRules.buildings,
+                  // Only what this territory is allowed to build.
+                  items: GameRules.buildingsFor(
+                    widget.provinceId,
+                    borders: widget.borderCount,
+                  ),
                   name: (b) => b.name,
                   price: (b) => b.cost,
                   isEnabled: (b) => gold >= b.cost,
@@ -393,7 +403,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   price: pending?.cost,
                   info: pending == null
                       ? (cooling ? 'Cooling down after destroying a building' : '')
-                      : pending.effectLabel,
+                      : pending.effectLabelFor(widget.borderCount),
                   unaffordable: unaffordable,
                   button: FilledButton(
                     onPressed: canBuild ? _build : null,
