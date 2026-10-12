@@ -100,9 +100,11 @@ ThemeData buildConqueraTheme() {
     scaffoldBackgroundColor: ConqueraColors.sea,
   );
 
-  final buttonShape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(6),
-  );
+  // One button look for the whole game: hollow, thin outline, regular
+  // weight. FilledButton, OutlinedButton and TextButton all share it, so any
+  // button added later matches the "Manage" button without extra styling.
+  // Only the outline color changes for special actions (Attack, Destroy...).
+  final hollow = _hollowButtonStyle();
 
   return base.copyWith(
     textTheme: GoogleFonts.barlowTextTheme(base.textTheme).apply(
@@ -112,34 +114,49 @@ ThemeData buildConqueraTheme() {
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: ConqueraColors.accent,
     ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        backgroundColor: ConqueraColors.ink,
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: ConqueraColors.divider.withAlpha(90),
-        disabledForegroundColor: ConqueraColors.muted,
-        minimumSize: const Size(0, 40),
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        shape: buttonShape,
-        textStyle: GoogleFonts.barlow(
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-        ),
+    filledButtonTheme: FilledButtonThemeData(style: hollow),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: hollow),
+    textButtonTheme: TextButtonThemeData(
+      style: hollow.copyWith(
+        side: const MaterialStatePropertyAll(BorderSide.none),
       ),
     ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: ConqueraColors.ink,
-        disabledForegroundColor: ConqueraColors.muted,
-        side: const BorderSide(color: ConqueraColors.ink),
-        minimumSize: const Size(0, 36),
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        shape: buttonShape,
-        textStyle: GoogleFonts.barlow(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
+  );
+}
+
+/// The shared hollow button: transparent, 1px ink outline, medium weight.
+/// Disabled buttons go muted with a faint outline.
+ButtonStyle _hollowButtonStyle() {
+  bool disabled(Set<MaterialState> s) => s.contains(MaterialState.disabled);
+
+  return ButtonStyle(
+    backgroundColor: const MaterialStatePropertyAll(Colors.transparent),
+    surfaceTintColor: const MaterialStatePropertyAll(Colors.transparent),
+    elevation: const MaterialStatePropertyAll(0),
+    foregroundColor: MaterialStateProperty.resolveWith(
+      (s) => disabled(s) ? ConqueraColors.muted.withAlpha(150) : ConqueraColors.ink,
+    ),
+    side: MaterialStateProperty.resolveWith(
+      (s) => BorderSide(
+        color: disabled(s) ? ConqueraColors.divider : ConqueraColors.ink,
       ),
+    ),
+    overlayColor: MaterialStateProperty.resolveWith(
+      (s) => s.contains(MaterialState.pressed)
+          ? ConqueraColors.ink.withAlpha(20)
+          : s.contains(MaterialState.hovered)
+              ? ConqueraColors.ink.withAlpha(10)
+              : null,
+    ),
+    minimumSize: const MaterialStatePropertyAll(Size(0, 36)),
+    padding: const MaterialStatePropertyAll(
+      EdgeInsets.symmetric(horizontal: 14),
+    ),
+    shape: MaterialStatePropertyAll(
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    ),
+    textStyle: MaterialStatePropertyAll(
+      GoogleFonts.barlow(fontSize: 14, fontWeight: FontWeight.w500),
     ),
   );
 }

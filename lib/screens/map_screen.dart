@@ -18,6 +18,7 @@ import '../theme/conquera_theme.dart';
 import '../widgets/attack_dialog.dart';
 import '../widgets/country_info_panel.dart';
 import '../widgets/gold_amount.dart';
+import '../widgets/map_viewport.dart';
 import '../widgets/player_top_bar.dart';
 import '../widgets/province_detail_dialog.dart';
 import '../widgets/world_sidebar.dart';
@@ -26,11 +27,12 @@ import '../widgets/world_sidebar.dart';
 /// info panel; tap the ocean (or the close button) to clear. The panel's
 /// "Manage" button opens the province window (build / reinforce).
 ///
-/// Same approach as Urbanize: [InteractiveViewer] gives smooth pan/zoom,
-/// and a [Listener] (not a GestureDetector) does tap detection, because a
-/// nested tap recognizer loses the gesture arena to InteractiveViewer's
-/// scale recognizer. [PointerEvent.localPosition] arrives already in map
-/// coordinates, so no matrix math is needed for hit-testing.
+/// [MapViewport] gives smooth pan/zoom (with a gliding fling), wraps the
+/// world sideways and stops at the vertical limits. A [Listener] (not a
+/// GestureDetector) does tap detection, because a nested tap recognizer
+/// loses the gesture arena to the viewport's scale recognizer. The scene
+/// holds two copies of the world, so [PointerEvent.localPosition] is folded
+/// back onto the first copy before hit-testing.
 ///
 /// The map is three layers: a static base (all countries), a badge layer
 /// (building icons and power numbers) and a small selection overlay. Icons
@@ -63,7 +65,7 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen>
     with TickerProviderStateMixin {
   final MapController _controller = MapController();
-  final TransformationController _transform = TransformationController();
+  final MapCameraController _transform = MapCameraController();
 
   Offset? _pointerDown;
   static const double _tapSlop = 12.0; // screen pixels
@@ -71,7 +73,12 @@ class _MapScreenState extends State<MapScreen>
   // Zoom limits. The most zoomed-out view is "Africa fills the screen", so
   // the player can never see the whole planet at once.
   static const double _maxScale = 16;
-  static const double _boundaryMargin = 400;
+
+  /// How far past Greenland's northern tip / South America's southern tip
+  /// the view may go, as a share of the map height. The map wraps sideways
+  /// (the earth is round) but not up and down.
+  static const double _topMarginFrac = 0.01;
+  static const double _bottomMarginFrac = 0.03;
 
   /// Extra room around Africa's bounding box at the zoomed-out limit.
   static const double _africaPadding = 0.04;
@@ -198,13 +205,6 @@ class _MapScreenState extends State<MapScreen>
     super.dispose();
   }
 
-  /// Scale at which the whole map fits the viewport.
-  double _fitScaleFor(Size viewport) {
-    final map = _controller.mapSize;
-    if (map.isEmpty || viewport.isEmpty) return 1.0;
-    return min(viewport.width / map.width, viewport.height / map.height);
-  }
-
   /// Bounding box of Africa (padded), or null if its countries aren't found.
   Rect? _africaRect() {
     final cached = _africaRectCache;
@@ -223,17 +223,54 @@ class _MapScreenState extends State<MapScreen>
     return _africaRectCache = union.inflate(pad);
   }
 
-  /// The most zoomed-out scale allowed: Africa fills the viewport. Never
-  /// lower than the whole-map fit.
+  /// Highest and lowest map y the camera may show: the northern tip of
+  /// Greenland, and a little past the southern tip of South America.
+  (double, double) _verticalLimits() {
+    final map = _controller.mapSize;
+    final top =
+        (_controller.provinceById('GL')?.bounds.top ?? 0) -
+            map.height * _topMarginFrac;
+
+    double? south;
+    for (final id in const ['AR', 'CL']) {
+      final bottom = _controller.provinceById(id)?.bounds.bottom;
+      if (bottom != null && (south == null || bottom > south)) south = bottom;
+    }
+    final bottom = (south ?? map.height) + map.height * _bottomMarginFrac;
+    return (top, bottom);
+  }
+
+  /// Gives the camera its rules for this viewport: wrap sideways, stay
+  /// between the vertical limits.
+  void _configureCamera(Size viewport) {
+    final limits = _verticalLimits();
+    _transform
+      ..wrapWidth = _controller.mapSize.width
+      ..topLimit = limits.$1
+      ..bottomLimit = limits.$2
+      ..viewportHeight = viewport.height;
+  }
+
+  /// The most zoomed-out scale allowed: Africa fills the viewport, but
+  /// never so far out that the view shows more than one world across or
+  /// more than the allowed height.
   double _minScaleFor(Size viewport) {
-    final whole = _fitScaleFor(viewport);
-    final africa = _africaRect();
-    if (africa == null || viewport.isEmpty) return whole;
-    final africaFit = min(
-      viewport.width / africa.width,
-      viewport.height / africa.height,
+    final map = _controller.mapSize;
+    if (map.isEmpty || viewport.isEmpty) return 1.0;
+
+    final limits = _verticalLimits();
+    var scale = max(
+      viewport.width / map.width,
+      viewport.height / (limits.$2 - limits.$1),
     );
-    return max(whole, africaFit);
+    final africa = _africaRect();
+    if (africa != null) {
+      scale = max(
+        scale,
+        min(viewport.width / africa.width, viewport.height / africa.height),
+      );
+    }
+    return scale;
   }
 
   /// Starts at the zoomed-out limit, centered on Africa. Runs on first
@@ -243,23 +280,12 @@ class _MapScreenState extends State<MapScreen>
     if (map.isEmpty || viewport.isEmpty) return;
 
     final scale = _minScaleFor(viewport);
-    var focus = _africaRect()?.center ?? map.center(Offset.zero);
 
-    // Start on the player's own land if we know where it is, keeping the
-    // view inside the pannable area.
-    final home = _homePoint();
-    if (home != null) {
-      double clampAxis(double v, double lo, double hi) =>
-          lo > hi ? (lo + hi) / 2 : v.clamp(lo, hi).toDouble();
-      final halfW = viewport.width / scale / 2;
-      final halfH = viewport.height / scale / 2;
-      focus = Offset(
-        clampAxis(home.dx, -_boundaryMargin + halfW,
-            map.width + _boundaryMargin - halfW),
-        clampAxis(home.dy, -_boundaryMargin + halfH,
-            map.height + _boundaryMargin - halfH),
-      );
-    }
+    // Start on the player's own land if we know where it is, otherwise on
+    // Africa. The camera keeps itself inside the vertical limits.
+    final focus = _homePoint() ??
+        _africaRect()?.center ??
+        map.center(Offset.zero);
 
     final dx = viewport.width / 2 - focus.dx * scale;
     final dy = viewport.height / 2 - focus.dy * scale;
@@ -311,7 +337,15 @@ class _MapScreenState extends State<MapScreen>
       final power = state.troops.floor();
       if (icon == null && power <= 0) return;
 
-      badges.add(MapBadge(anchor: province.anchor, icon: icon, power: power));
+      badges.add(
+        MapBadge(
+          anchor: province.anchor,
+          icon: icon,
+          power: power,
+          extent: sqrt(province.bounds.width * province.bounds.height),
+          color: _players.value[state.ownerId]?.color,
+        ),
+      );
     });
     return badges;
   }
@@ -326,8 +360,9 @@ class _MapScreenState extends State<MapScreen>
   }
 
   /// Buys the unclaimed [target] (it must border one of the player's
-  /// provinces). Asks first, then reports the outcome in a snackbar.
+  /// provinces). Asks first, then plays the annexation on the map.
   Future<void> _claim(Province target) async {
+    if (_battleRunning) return;
     final cost = GameRules.claimCost;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -371,8 +406,42 @@ class _MapScreenState extends State<MapScreen>
       ),
     );
     if (confirmed != true || !mounted) return;
+    await _runClaim(target);
+  }
 
+  /// Buys [target] and plays the same camera flight and sweep as a won
+  /// attack, without the war borders, then the "annexed" pop-up.
+  Future<void> _runClaim(Province target) async {
+    if (_battleRunning) return;
+    final me = _players.value[_uid];
+    final attackerColor = me?.color ?? ConqueraColors.accent;
     final messenger = ScaffoldMessenger.of(context);
+    final fighters = _myBorderingIds(target);
+
+    _controller.clearSelection();
+    _popupAnim.stop();
+    _popupAnim.value = 0;
+    _popup = null;
+    _fx.value = 0;
+    setState(() {
+      // Keep the land looking unclaimed until the sweep reaches it.
+      _colorOverrides = {target.id: Colors.transparent};
+      _hiddenIds = const {};
+      _battle = _battleView(
+        target: target,
+        fighterIds: fighters,
+        defenderSupportIds: const [],
+        attackerColor: attackerColor,
+        defenderColor: ConqueraColors.muted,
+        outcome: BattleOutcome.pending,
+        showOutlines: false,
+      );
+    });
+
+    // Fly to the territory while the claim goes to the server.
+    final pan = _panToTarget(target);
+
+    String? error;
     try {
       await _firestore.claimUnclaimedProvince(
         gameId: widget.gameId,
@@ -380,15 +449,43 @@ class _MapScreenState extends State<MapScreen>
         provinceId: target.id,
         neighborIds: _controller.neighborsOf(target.id),
       );
-      messenger.showSnackBar(SnackBar(content: Text('${target.name} claimed.')));
     } on GameActionException catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      error = e.message;
     } catch (e) {
       debugPrint('Claim failed: $e');
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Something went wrong. Try again.')),
-      );
+      error = 'Something went wrong. Try again.';
     }
+    await pan;
+    if (!mounted) return;
+
+    if (error != null) {
+      _endBattle();
+      messenger.showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+
+    setState(() {
+      _battle = _battleView(
+        target: target,
+        fighterIds: fighters,
+        defenderSupportIds: const [],
+        attackerColor: attackerColor,
+        defenderColor: ConqueraColors.muted,
+        outcome: BattleOutcome.won,
+        showOutlines: false,
+      );
+    });
+    _fx.duration = const Duration(milliseconds: 1100);
+    await _fx.forward(from: 0);
+    if (!mounted) return;
+    setState(() {
+      _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
+    });
+    _showPopup(target, 'annexed ', attackerColor);
+
+    await _popupAnim.forward(from: 0);
+    if (!mounted) return;
+    _endBattle();
   }
 
   /// Barracks the player owns that could join an attack on [target]:
@@ -443,46 +540,31 @@ class _MapScreenState extends State<MapScreen>
     final current = _transform.value.getMaxScaleOnAxis();
     final scale = max(current, minScale).clamp(minZoom, maxZoom).toDouble();
 
-    // Keep the view inside the pannable area, like the initial fit does.
+    // The world wraps: fly to whichever copy of the target is nearest, so
+    // the camera takes the short way round. The camera controller keeps the
+    // result inside the vertical limits.
     final map = _controller.mapSize;
-    double clampAxis(double v, double lo, double hi) =>
-        lo > hi ? (lo + hi) / 2 : v.clamp(lo, hi).toDouble();
-    final halfW = _viewport.width / scale / 2;
-    final halfH = _viewport.height / scale / 2;
-    final target = Offset(
-      clampAxis(focus.dx, -_boundaryMargin + halfW,
-          map.width + _boundaryMargin - halfW),
-      clampAxis(focus.dy, -_boundaryMargin + halfH,
-          map.height + _boundaryMargin - halfH),
-    );
+    final from = _currentFocus();
+    var targetX = focus.dx;
+    if (map.width > 0) {
+      targetX -= map.width * ((targetX - from.dx) / map.width).round();
+    }
+    final target = Offset(targetX, focus.dy);
 
-    _camFromFocus = _currentFocus();
+    _camFromFocus = from;
     _camToFocus = target;
     _camFromScale = current;
     _camToScale = scale;
     await _cam.forward(from: 0);
   }
 
-  /// Centers the camera on the fight: the target and the provinces that
-  /// border it from the attacker's side.
-  Future<void> _panToWarZone(Province target, Set<String> fighterIds) {
-    final border = _controller.neighborsOf(target.id);
-    var zone = target.bounds;
-    var any = false;
-    for (final id in fighterIds) {
-      if (!border.contains(id)) continue;
-      final p = _controller.provinceById(id);
-      if (p == null) continue;
-      zone = zone.expandToInclude(p.bounds);
-      any = true;
-    }
-    // Barracks far behind the front don't pull the camera away.
-    if (!any) zone = target.bounds;
-
+  /// Flies the camera to [target] (the country being invaded or claimed),
+  /// zooming in a little if it is too small to see the animation.
+  Future<void> _panToTarget(Province target) {
     final current = _transform.value.getMaxScaleOnAxis();
     final targetSide = max(target.bounds.longestSide, 1.0);
     final wanted = _minTargetPx / targetSide;
-    return _panTo(zone.center, minScale: wanted > current ? wanted : 0);
+    return _panTo(target.anchor, minScale: wanted > current ? wanted : 0);
   }
 
   /// Opens the battle preview against [target]. Confirming closes it and
@@ -558,6 +640,7 @@ class _MapScreenState extends State<MapScreen>
     required Color attackerColor,
     required Color defenderColor,
     required BattleOutcome outcome,
+    bool showOutlines = true,
   }) {
     return BattleView(
       attackerPaths: [
@@ -576,6 +659,7 @@ class _MapScreenState extends State<MapScreen>
       outcome: outcome,
       sweepDirection: _attackDirection(target, fighterIds),
       fillAlpha: _ownerFillAlpha,
+      showOutlines: showOutlines,
     );
   }
 
@@ -611,8 +695,8 @@ class _MapScreenState extends State<MapScreen>
       );
     });
 
-    // Fly to the war zone while the attack goes to the server.
-    final pan = _panToWarZone(target, previewFighters);
+    // Fly to the invaded country while the attack goes to the server.
+    final pan = _panToTarget(target);
 
     final started = DateTime.now();
     AttackResult? result;
@@ -765,7 +849,11 @@ class _MapScreenState extends State<MapScreen>
     _pointerDown = null;
     if (start == null) return;
     if ((e.position - start).distance <= _tapSlop) {
-      _controller.selectAt(e.localPosition);
+      // The scene holds two copies of the world: fold the tap back onto
+      // the first one.
+      final p = e.localPosition;
+      final w = _controller.mapSize.width;
+      _controller.selectAt(w > 0 ? Offset(p.dx % w, p.dy) : p);
     }
   }
 
@@ -773,7 +861,16 @@ class _MapScreenState extends State<MapScreen>
   /// fades in and out. Follows the territory as the map is panned/zoomed.
   Widget _popupWidget(_Popup popup) {
     final t = _popupAnim.value;
-    final point = MatrixUtils.transformPoint(_transform.value, popup.anchor);
+    // Draw it on the copy of the world that is closest to the camera.
+    final mapWidth = _controller.mapSize.width;
+    var anchorX = popup.anchor.dx;
+    if (mapWidth > 0) {
+      anchorX -= mapWidth * ((anchorX - _currentFocus().dx) / mapWidth).round();
+    }
+    final point = MatrixUtils.transformPoint(
+      _transform.value,
+      Offset(anchorX, popup.anchor.dy),
+    );
     final rise = 10 + 26 * Curves.easeOut.transform(t.clamp(0.0, 1.0).toDouble());
     final opacity = t < 0.12
         ? t / 0.12
@@ -891,6 +988,7 @@ class _MapScreenState extends State<MapScreen>
                         builder: (context, constraints) {
                           final viewport = constraints.biggest;
                           _viewport = viewport;
+                          _configureCamera(viewport);
                           if (_fittedFor != viewport) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               if (mounted) _fitToViewport(viewport);
@@ -902,28 +1000,36 @@ class _MapScreenState extends State<MapScreen>
                           final maxScale = max(_maxScale, minScale * 14);
                           final powerMinScale = minScale * _powerZoomFactor;
 
-                          return InteractiveViewer(
-                            transformationController: _transform,
-                            constrained: false,
+                          // Two copies of the world side by side, so the
+                          // view can scroll past the right edge onto the
+                          // left edge of the map again.
+                          final mapSize = _controller.mapSize;
+                          final sceneSize =
+                              Size(mapSize.width * 2, mapSize.height);
+
+                          return MapViewport(
+                            controller: _transform,
+                            contentSize: sceneSize,
                             minScale: minScale,
                             maxScale: maxScale,
-                            boundaryMargin: const EdgeInsets.all(_boundaryMargin),
+                            onInteractionStart: () => _cam.stop(canceled: false),
                             child: Listener(
                               behavior: HitTestBehavior.opaque,
                               onPointerDown: _onPointerDown,
                               onPointerUp: _onPointerUp,
                               child: SizedBox(
-                                width: _controller.mapSize.width,
-                                height: _controller.mapSize.height,
+                                width: sceneSize.width,
+                                height: sceneSize.height,
                                 child: Stack(
                                   children: [
                                     RepaintBoundary(
                                       child: CustomPaint(
-                                        size: _controller.mapSize,
+                                        size: sceneSize,
                                         painter: MapPainter(
                                           provinces: _controller.provinces,
                                           ownerFillColors: _ownerFillColors(),
                                           hiddenIds: _hiddenIds,
+                                          wrapWidth: mapSize.width,
                                         ),
                                       ),
                                     ),
@@ -931,12 +1037,13 @@ class _MapScreenState extends State<MapScreen>
                                       IgnorePointer(
                                         child: RepaintBoundary(
                                           child: CustomPaint(
-                                            size: _controller.mapSize,
+                                            size: sceneSize,
                                             painter: BattlePainter(
                                               view: _battle!,
                                               pulse: _pulse,
                                               fx: _fx,
                                               transform: _transform,
+                                              wrapWidth: mapSize.width,
                                             ),
                                           ),
                                         ),
@@ -944,7 +1051,7 @@ class _MapScreenState extends State<MapScreen>
                                     IgnorePointer(
                                       child: RepaintBoundary(
                                         child: CustomPaint(
-                                          size: _controller.mapSize,
+                                          size: sceneSize,
                                           painter: BadgePainter(
                                             badges: _badges(),
                                             transform: _transform,
@@ -952,6 +1059,7 @@ class _MapScreenState extends State<MapScreen>
                                             iconSize: _iconPxAtMinZoom / minScale,
                                             powerSize:
                                                 _powerPxAtPowerZoom / powerMinScale,
+                                            wrapWidth: mapSize.width,
                                           ),
                                         ),
                                       ),
@@ -961,11 +1069,12 @@ class _MapScreenState extends State<MapScreen>
                                         child: AnimatedBuilder(
                                           animation: _transform,
                                           builder: (context, _) => CustomPaint(
-                                            size: _controller.mapSize,
+                                            size: sceneSize,
                                             painter: SelectionPainter(
                                               path: selected?.path,
                                               scale: _transform.value
                                                   .getMaxScaleOnAxis(),
+                                              wrapWidth: mapSize.width,
                                             ),
                                           ),
                                         ),
@@ -1027,6 +1136,9 @@ class _MapScreenState extends State<MapScreen>
             open: _sidebarOpen,
             worldId: widget.gameId,
             onClose: () => setState(() => _sidebarOpen = false),
+            players: _players,
+            provinces: _provinceStates,
+            myUid: _uid,
           ),
         ],
       ),

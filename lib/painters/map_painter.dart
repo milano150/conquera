@@ -31,10 +31,25 @@ class MapPainter extends CustomPainter {
     this.fillColor = ConqueraColors.land,
     this.strokeColor = ConqueraColors.border,
     this.strokeWidth = 0.5,
+    this.wrapWidth = 0,
   });
+
+  /// Width of one world in map units. When set, the layer is drawn twice
+  /// side by side so the map can wrap around horizontally.
+  final double wrapWidth;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final copies = wrapWidth > 0 ? 2 : 1;
+    for (var i = 0; i < copies; i++) {
+      canvas.save();
+      canvas.translate(i * wrapWidth, 0);
+      _paintOnce(canvas, size);
+      canvas.restore();
+    }
+  }
+
+  void _paintOnce(Canvas canvas, Size size) {
     final fillPaint = Paint()
       ..style = PaintingStyle.fill
       ..color = fillColor;
@@ -71,7 +86,8 @@ class MapPainter extends CustomPainter {
         !setEquals(oldDelegate.hiddenIds, hiddenIds) ||
         oldDelegate.fillColor != fillColor ||
         oldDelegate.strokeColor != strokeColor ||
-        oldDelegate.strokeWidth != strokeWidth;
+        oldDelegate.strokeWidth != strokeWidth ||
+        oldDelegate.wrapWidth != wrapWidth;
   }
 }
 
@@ -88,10 +104,28 @@ class SelectionPainter extends CustomPainter {
   static const double _casingPx = 3.4;
   static const double _corePx = 1.4;
 
-  SelectionPainter({required this.path, required this.scale});
+  SelectionPainter({
+    required this.path,
+    required this.scale,
+    this.wrapWidth = 0,
+  });
+
+  /// Width of one world in map units. When set, the layer is drawn twice
+  /// side by side so the map can wrap around horizontally.
+  final double wrapWidth;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final copies = wrapWidth > 0 ? 2 : 1;
+    for (var i = 0; i < copies; i++) {
+      canvas.save();
+      canvas.translate(i * wrapWidth, 0);
+      _paintOnce(canvas, size);
+      canvas.restore();
+    }
+  }
+
+  void _paintOnce(Canvas canvas, Size size) {
     final selected = path;
     if (selected == null || scale <= 0) return;
 
@@ -109,7 +143,9 @@ class SelectionPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SelectionPainter oldDelegate) {
-    return !identical(oldDelegate.path, path) || oldDelegate.scale != scale;
+    return !identical(oldDelegate.path, path) ||
+        oldDelegate.scale != scale ||
+        oldDelegate.wrapWidth != wrapWidth;
   }
 }
 /// 0..1 opacity as a 0..255 alpha.
@@ -139,6 +175,10 @@ class BattleView {
   /// Opacity of the owner fill (0-255), so the sweep matches the map.
   final int fillAlpha;
 
+  /// Whether the involved provinces get their pulsing border. On for a war,
+  /// off when someone just annexes unclaimed land.
+  final bool showOutlines;
+
   const BattleView({
     required this.attackerPaths,
     required this.attackerColor,
@@ -148,6 +188,7 @@ class BattleView {
     required this.outcome,
     required this.sweepDirection,
     required this.fillAlpha,
+    this.showOutlines = true,
   });
 }
 
@@ -176,10 +217,25 @@ class BattlePainter extends CustomPainter {
     required this.pulse,
     required this.fx,
     required this.transform,
+    this.wrapWidth = 0,
   }) : super(repaint: Listenable.merge([pulse, fx, transform]));
+
+  /// Width of one world in map units. When set, the layer is drawn twice
+  /// side by side so the map can wrap around horizontally.
+  final double wrapWidth;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final copies = wrapWidth > 0 ? 2 : 1;
+    for (var i = 0; i < copies; i++) {
+      canvas.save();
+      canvas.translate(i * wrapWidth, 0);
+      _paintOnce(canvas, size);
+      canvas.restore();
+    }
+  }
+
+  void _paintOnce(Canvas canvas, Size size) {
     final scale = transform.value.getMaxScaleOnAxis();
     if (scale <= 0) return;
 
@@ -194,6 +250,8 @@ class BattlePainter extends CustomPainter {
       shift = Offset(wobble, 0);
       _paintShakenTarget(canvas, shift);
     }
+
+    if (!view.showOutlines) return;
 
     final alpha = 0.6 + 0.4 * pulse.value;
     for (final path in view.attackerPaths) {
@@ -298,7 +356,8 @@ class BattlePainter extends CustomPainter {
     return !identical(oldDelegate.view, view) ||
         !identical(oldDelegate.pulse, pulse) ||
         !identical(oldDelegate.fx, fx) ||
-        !identical(oldDelegate.transform, transform);
+        !identical(oldDelegate.transform, transform) ||
+        oldDelegate.wrapWidth != wrapWidth;
   }
 }
 
@@ -312,26 +371,49 @@ class MapBadge {
   /// 0 means "nothing to show".
   final int power;
 
-  const MapBadge({required this.anchor, this.icon, this.power = 0});
+  /// How big the province is, in map units (about the width of its bounding
+  /// box). Small countries get small badges, or only a dot when zoomed out.
+  final double extent;
+
+  /// The owner's color; the icon and number are drawn in a dark shade of it.
+  final Color? color;
+
+  const MapBadge({
+    required this.anchor,
+    this.icon,
+    this.power = 0,
+    this.extent = double.infinity,
+    this.color,
+  });
 
   @override
   bool operator ==(Object other) =>
       other is MapBadge &&
       other.anchor == anchor &&
       other.icon == icon &&
-      other.power == power;
+      other.power == power &&
+      other.extent == extent &&
+      other.color == color;
 
   @override
-  int get hashCode => Object.hash(anchor, icon, power);
+  int get hashCode => Object.hash(anchor, icon, power, extent, color);
 }
 
 /// The badge layer: a building icon in the centre of each province that
-/// has one, with its power as a small grey number right under it.
+/// has one, with its power as a small number right under it.
 ///
-/// Icons and numbers have a constant size in map units, so they scale with
-/// the map exactly like the countries do. Power numbers only appear once
-/// the map is zoomed in to [powerMinScale], so the zoomed-out view stays
-/// clean.
+/// Badges are sized to their province, so a tiny country never gets an icon
+/// bigger than itself:
+///  * the icon is [iconSize] at most, and never more than [_iconShare] of
+///    the province's [MapBadge.extent];
+///  * while that icon would be smaller than [_minIconPx] on screen, a small
+///    dot marks the building instead (and nothing at all if even the
+///    province itself is only a few pixels wide);
+///  * the power number follows the same rule with [powerSize], and only
+///    shows once the map is zoomed in to [powerMinScale].
+///
+/// Everything is drawn in a dark shade of the owner's color, so it reads as
+/// part of the map instead of as black stickers.
 ///
 /// It repaints whenever the pan/zoom [transform] changes, without any
 /// widget rebuild, and caches its text so that stays cheap.
@@ -352,21 +434,44 @@ class BadgePainter extends CustomPainter {
     required this.powerMinScale,
     required this.iconSize,
     required this.powerSize,
+    this.wrapWidth = 0,
   }) : super(repaint: transform);
 
-  final Map<IconData, TextPainter> _iconCache = {};
-  final Map<int, TextPainter> _powerCache = {};
+  /// Largest icon / number, as a share of the province's extent.
+  static const double _iconShare = 0.45;
+  static const double _powerShare = 0.3;
 
-  TextPainter _iconPainter(IconData icon) {
-    return _iconCache.putIfAbsent(icon, () {
+  /// Smallest icon / number worth drawing, in screen pixels.
+  static const double _minIconPx = 9;
+  static const double _minPowerPx = 8;
+
+  /// A province narrower than this on screen gets no marker at all.
+  static const double _minDotProvincePx = 5;
+
+  /// How dark the owner's color gets for icons, and how opaque they are.
+  static const double _inkMix = 0.62;
+  static const int _inkAlpha = 225;
+
+  final Map<String, TextPainter> _iconCache = {};
+  final Map<String, TextPainter> _powerCache = {};
+
+  static Color _tint(Color? owner) {
+    if (owner == null) return ConqueraColors.ink.withAlpha(_inkAlpha);
+    return Color.lerp(owner.withAlpha(255), ConqueraColors.ink, _inkMix)!
+        .withAlpha(_inkAlpha);
+  }
+
+  TextPainter _iconPainter(IconData icon, double size, Color color) {
+    final key = '${icon.codePoint}|${size.toStringAsFixed(2)}|${color.hashCode}';
+    return _iconCache.putIfAbsent(key, () {
       return TextPainter(
         text: TextSpan(
           text: String.fromCharCode(icon.codePoint),
           style: TextStyle(
-            fontSize: iconSize,
+            fontSize: size,
             fontFamily: icon.fontFamily,
             package: icon.fontPackage,
-            color: Colors.black,
+            color: color,
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -374,15 +479,16 @@ class BadgePainter extends CustomPainter {
     });
   }
 
-  TextPainter _powerPainter(int power) {
-    return _powerCache.putIfAbsent(power, () {
+  TextPainter _powerPainter(int power, double size, Color color) {
+    final key = '$power|${size.toStringAsFixed(2)}|${color.hashCode}';
+    return _powerCache.putIfAbsent(key, () {
       return TextPainter(
         text: TextSpan(
           text: '$power',
           style: ConqueraText.label.copyWith(
-            fontSize: powerSize,
+            fontSize: size,
             fontWeight: FontWeight.w600,
-            color: Colors.grey.shade700,
+            color: color,
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -390,22 +496,64 @@ class BadgePainter extends CustomPainter {
     });
   }
 
+  /// Width of one world in map units. When set, the layer is drawn twice
+  /// side by side so the map can wrap around horizontally.
+  final double wrapWidth;
+
   @override
   void paint(Canvas canvas, Size size) {
+    final copies = wrapWidth > 0 ? 2 : 1;
+    for (var i = 0; i < copies; i++) {
+      canvas.save();
+      canvas.translate(i * wrapWidth, 0);
+      _paintOnce(canvas, size);
+      canvas.restore();
+    }
+  }
+
+  void _paintOnce(Canvas canvas, Size size) {
     final scale = transform.value.getMaxScaleOnAxis();
     if (scale <= 0) return;
     final showPower = scale >= powerMinScale;
 
     for (final badge in badges) {
+      final provincePx = badge.extent * scale;
+      final color = _tint(badge.color);
+
+      // Sized to the province, capped at the normal size.
       final icon = badge.icon;
-      final showNumber = showPower && badge.power > 0;
-      if (icon == null && !showNumber) continue;
+      final iconMapSize = min(iconSize, badge.extent * _iconShare);
+      final iconFits = icon != null && iconMapSize * scale >= _minIconPx;
+
+      final powerMapSize = min(powerSize, badge.extent * _powerShare);
+      final showNumber = showPower &&
+          badge.power > 0 &&
+          powerMapSize * scale >= _minPowerPx;
 
       canvas.save();
       canvas.translate(badge.anchor.dx, badge.anchor.dy);
 
-      if (icon != null) {
-        final painter = _iconPainter(icon);
+      if (icon != null && !iconFits) {
+        // Too small for the icon: a dot, unless the province itself is a
+        // speck on screen.
+        if (provincePx >= _minDotProvincePx) {
+          final radius = (provincePx * 0.1).clamp(1.5, 3.5) / scale;
+          canvas.drawCircle(
+            Offset.zero,
+            radius,
+            Paint()..color = color,
+          );
+          canvas.drawCircle(
+            Offset.zero,
+            radius,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.8 / scale
+              ..color = Colors.white.withAlpha(200),
+          );
+        }
+      } else if (icon != null) {
+        final painter = _iconPainter(icon, iconMapSize, color);
         painter.paint(
           canvas,
           Offset(-painter.width / 2, -painter.height / 2),
@@ -413,9 +561,9 @@ class BadgePainter extends CustomPainter {
       }
 
       if (showNumber) {
-        final painter = _powerPainter(badge.power);
-        // Under the icon, or centred when the province has no building.
-        final top = icon != null ? iconSize / 2 : -painter.height / 2;
+        final painter = _powerPainter(badge.power, powerMapSize, color);
+        // Under the icon, or centred when there's no icon to sit under.
+        final top = iconFits ? iconMapSize / 2 : -painter.height / 2;
         painter.paint(canvas, Offset(-painter.width / 2, top));
       }
 
@@ -429,6 +577,7 @@ class BadgePainter extends CustomPainter {
         oldDelegate.powerMinScale != powerMinScale ||
         oldDelegate.iconSize != iconSize ||
         oldDelegate.powerSize != powerSize ||
+        oldDelegate.wrapWidth != wrapWidth ||
         !identical(oldDelegate.transform, transform);
   }
 }

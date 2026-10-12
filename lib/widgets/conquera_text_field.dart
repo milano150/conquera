@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../theme/conquera_theme.dart';
 
-/// The app's single-line text input: centered text, pale fill, thin outline
-/// that darkens when focused.
+/// The app's single-line text input: centered text, no fill, thin outline
+/// that darkens when focused (matches the hollow buttons).
 class ConqueraTextField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
@@ -52,7 +52,7 @@ class ConqueraTextField extends StatelessWidget {
         ),
         counterText: '',
         filled: true,
-        fillColor: ConqueraColors.surface,
+        fillColor: Colors.white,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: ConqueraSpace.md,
           vertical: 14,

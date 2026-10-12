@@ -241,7 +241,7 @@ class _AttackDialogState extends State<AttackDialog> {
                 ),
                 const SizedBox(height: ConqueraSpace.md),
                 _bar(),
-                if (_attackPower <= 0 || !_wouldWin) ...[
+                if (_attackPower <= 0) ...[
                   const SizedBox(height: ConqueraSpace.md),
                   _warning(),
                 ],
@@ -263,13 +263,15 @@ class _AttackDialogState extends State<AttackDialog> {
           child: const Text('Cancel'),
         ),
         const SizedBox(width: ConqueraSpace.sm),
-        FilledButton(
+        OutlinedButton(
           onPressed: _attackPower > 0 ? _confirm : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: ConqueraColors.danger,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: ConqueraColors.divider.withAlpha(90),
-            disabledForegroundColor: ConqueraColors.muted,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: ConqueraColors.danger,
+            side: BorderSide(
+              color: _attackPower > 0
+                  ? ConqueraColors.danger
+                  : ConqueraColors.divider,
+            ),
           ),
           child: const Text('Confirm attack'),
         ),
@@ -341,21 +343,12 @@ class _AttackDialogState extends State<AttackDialog> {
     );
   }
 
-  /// Only shown when the attack can't work (no power, or too weak). A
-  /// winning attack needs no text: the bar already says it.
+  /// Only shown when none of your bordering provinces has any power. A
+  /// weak or winning attack needs no text: the bar already says it.
   Widget _warning() {
-    if (_attackPower <= 0) {
-      return Text(
-        'Your bordering provinces have no power.',
-        style: ConqueraText.label.copyWith(color: ConqueraColors.danger),
-      );
-    }
     return Text(
-      'Not enough power: this attack would fail.',
-      style: ConqueraText.value.copyWith(
-        fontWeight: FontWeight.w600,
-        color: ConqueraColors.danger,
-      ),
+      'Your bordering provinces have no power.',
+      style: ConqueraText.label.copyWith(color: ConqueraColors.danger),
     );
   }
 }

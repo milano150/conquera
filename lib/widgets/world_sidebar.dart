@@ -1,9 +1,13 @@
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../models/player_state.dart';
+import '../models/province_state.dart';
 import '../theme/conquera_theme.dart';
+import 'leaderboard_panel.dart';
 
 /// Slide-in menu that covers the left of the screen while the rest of the
 /// screen (the world) blurs behind it. Put it on top of everything in a
@@ -18,11 +22,21 @@ class WorldSidebar extends StatefulWidget {
   final String worldId;
   final VoidCallback onClose;
 
+  /// Live world data for the leaderboard.
+  final ValueListenable<Map<String, PlayerState>> players;
+  final ValueListenable<Map<String, ProvinceState>> provinces;
+
+  /// The current player, highlighted in the leaderboard.
+  final String? myUid;
+
   const WorldSidebar({
     super.key,
     required this.open,
     required this.worldId,
     required this.onClose,
+    required this.players,
+    required this.provinces,
+    this.myUid,
   });
 
   @override
@@ -99,7 +113,12 @@ class _WorldSidebarState extends State<WorldSidebar>
               width: width,
               child: FractionalTranslation(
                 translation: Offset(t - 1, 0),
-                child: _Panel(worldId: widget.worldId),
+                child: _Panel(
+                  worldId: widget.worldId,
+                  players: widget.players,
+                  provinces: widget.provinces,
+                  myUid: widget.myUid,
+                ),
               ),
             ),
           ],
@@ -109,10 +128,25 @@ class _WorldSidebarState extends State<WorldSidebar>
   }
 }
 
-class _Panel extends StatelessWidget {
+class _Panel extends StatefulWidget {
   final String worldId;
+  final ValueListenable<Map<String, PlayerState>> players;
+  final ValueListenable<Map<String, ProvinceState>> provinces;
+  final String? myUid;
 
-  const _Panel({required this.worldId});
+  const _Panel({
+    required this.worldId,
+    required this.players,
+    required this.provinces,
+    required this.myUid,
+  });
+
+  @override
+  State<_Panel> createState() => _PanelState();
+}
+
+class _PanelState extends State<_Panel> {
+  bool _showLeaderboard = false;
 
   @override
   Widget build(BuildContext context) {
@@ -123,53 +157,67 @@ class _Panel extends StatelessWidget {
           border: Border(right: BorderSide(color: ConqueraColors.divider)),
         ),
         child: SafeArea(
+          child: _showLeaderboard
+              ? LeaderboardPanel(
+                  players: widget.players,
+                  provinces: widget.provinces,
+                  myUid: widget.myUid,
+                  onBack: () => setState(() => _showLeaderboard = false),
+                )
+              : _menu(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _menu(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(ConqueraSpace.md),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'WORLD',
-                      style: ConqueraText.label.copyWith(
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    const SizedBox(height: ConqueraSpace.xs),
-                    Text(
-                      worldId,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: ConqueraText.title,
-                    ),
-                  ],
+              Text(
+                'WORLD',
+                style: ConqueraText.label.copyWith(
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
                 ),
               ),
-              const Divider(height: 1, color: ConqueraColors.divider),
-              // Nothing behind these yet.
-              _Item(label: 'Leaderboard', onTap: () {}),
-              _Item(label: 'How to play', onTap: () {}),
-              _Item(label: 'Settings', onTap: () {}),
-              const Spacer(),
-              Padding(
-                padding: const EdgeInsets.all(ConqueraSpace.md),
-                child: FilledButton(
-                  // Not functional yet.
-                  onPressed: () {},
-                  style: FilledButton.styleFrom(
-                    backgroundColor: ConqueraColors.danger,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Leave world'),
-                ),
+              const SizedBox(height: ConqueraSpace.xs),
+              Text(
+                widget.worldId,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: ConqueraText.title,
               ),
             ],
           ),
         ),
-      ),
+        const Divider(height: 1, color: ConqueraColors.divider),
+        _Item(
+          label: 'Leaderboard',
+          onTap: () => setState(() => _showLeaderboard = true),
+        ),
+        // Nothing behind these yet.
+        _Item(label: 'How to play', onTap: () {}),
+        _Item(label: 'Settings', onTap: () {}),
+        const Spacer(),
+        Padding(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
+          child: OutlinedButton(
+            // Back to the home screen (first route in the stack).
+            onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ConqueraColors.danger,
+              side: const BorderSide(color: ConqueraColors.danger),
+            ),
+            child: const Text('Back to lobby'),
+          ),
+        ),
+      ],
     );
   }
 }

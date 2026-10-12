@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../config/dev_session.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
-import '../widgets/blur_route.dart';
+import '../widgets/fade_route.dart';
 import '../widgets/conquera_text_field.dart';
 import 'join_screen.dart';
 import 'map_screen.dart';
@@ -65,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
 
       await Navigator.of(context).push(
-        BlurRoute<void>(
+        FadeRoute<void>(
           builder: (_) => joined
               ? MapScreen(gameId: worldId)
               : JoinScreen(gameId: worldId),
@@ -91,20 +91,29 @@ class _HomeScreenState extends State<HomeScreen> {
               constraints: const BoxConstraints(maxWidth: 320),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'conquera.beta',
+                    'conquera',
                     textAlign: TextAlign.center,
                     style: ConqueraText.title.copyWith(
-                      fontSize: 28,
-                      letterSpacing: -0.3,
+                      fontSize: 36,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: ConqueraSpace.xs),
+                  Text(
+                    'BETA',
+                    textAlign: TextAlign.center,
+                    style: ConqueraText.label.copyWith(
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 2,
                     ),
                   ),
                   const SizedBox(height: ConqueraSpace.xl),
                   ConqueraTextField(
                     controller: _worldId,
                     hint: 'enter world_id',
-                    enabled: !_busy,
                     autofocus: true,
                     textInputAction: TextInputAction.go,
                     onChanged: (_) {
@@ -113,23 +122,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     onSubmitted: (_) => _enter(),
                   ),
                   const SizedBox(height: ConqueraSpace.md),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: _busy ? null : _enter,
-                      child: _busy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Join world'),
+                  OutlinedButton(
+                    // Stays as it is while loading; _enter ignores extra taps.
+                    onPressed: _enter,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(46),
                     ),
+                    child: const Text('Join world'),
                   ),
-                  const SizedBox(height: ConqueraSpace.sm),
+                  const SizedBox(height: ConqueraSpace.md),
                   SizedBox(
                     height: 18,
                     child: _error == null

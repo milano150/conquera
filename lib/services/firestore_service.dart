@@ -759,6 +759,16 @@ class FirestoreService {
     final playerRef = _playerRef(gameId, uid);
     final candidates = [...spawnCandidates]..shuffle();
 
+    // A color belongs to the first player who picked it in this world.
+    final taken = await _gameRef(gameId)
+        .collection('players')
+        .where('colorHex', isEqualTo: colorHex)
+        .limit(1)
+        .get();
+    if (taken.docs.isNotEmpty && taken.docs.first.id != uid) {
+      throw const GameActionException('That color is already taken.');
+    }
+
     for (final provinceId in candidates) {
       final provinceRef = _provincesRef(gameId).doc(provinceId);
 

@@ -150,10 +150,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          OutlinedButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: ConqueraColors.danger,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ConqueraColors.danger,
+              side: const BorderSide(color: ConqueraColors.danger),
             ),
             child: const Text('Destroy'),
           ),
@@ -337,14 +338,16 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   _ActionRow(
                     info: def?.effectLabel ?? '',
                     unaffordable: false,
-                    button: FilledButton(
+                    button: OutlinedButton(
                       onPressed:
                           _busy ? null : () => _destroy(province.buildingLabel),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: ConqueraColors.danger,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor:
-                            ConqueraColors.divider.withAlpha(90),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: ConqueraColors.danger,
+                        side: BorderSide(
+                          color: _busy
+                              ? ConqueraColors.divider
+                              : ConqueraColors.danger,
+                        ),
                       ),
                       child: const Text('Destroy'),
                     ),
