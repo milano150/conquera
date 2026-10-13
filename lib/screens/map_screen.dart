@@ -851,7 +851,7 @@ class _MapScreenState extends State<MapScreen>
         uid: _uid,
         provinceId: province.id,
         provinceName: province.name,
-        borderCount: _controller.neighborsOf(province.id).length,
+        neighborIds: _controller.neighborsOf(province.id),
         provinceStates: _provinceStates,
         players: _players,
         firestore: _firestore,
@@ -875,6 +875,7 @@ class _MapScreenState extends State<MapScreen>
           gameId: widget.gameId,
           provinceId: provinceId,
           uid: _uid,
+          neighborIds: _controller.neighborsOf(provinceId),
         )
         .catchError((Object e) => debugPrint('Claim failed: $e'));
     return KeyEventResult.handled;

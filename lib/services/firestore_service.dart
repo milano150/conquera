@@ -86,13 +86,49 @@ class FirestoreService {
       (playerSnap.data()?['buildingIncome'] as num?)?.toDouble() ?? 0;
 
   /// Gold per second the building on this province makes (0 if none). A
-  /// market's output depends on the 'borders' count saved when it was built.
+  /// market earns for every bordering territory its owner holds; that count
+  /// is kept as 'trades' on the building and updated by [_shiftTrades]
+  /// whenever a bordering province changes hands.
   double _buildingIncomeOf(Map<String, dynamic>? provinceData) {
     final building = provinceData?['building'];
     if (building is! Map) return 0;
     final def = GameRules.buildingById(building['type'] as String? ?? '');
     if (def == null) return 0;
-    return def.incomeFor((building['borders'] as num?)?.toInt() ?? 0);
+    return def.incomeFor((building['trades'] as num?)?.toInt() ?? 0);
+  }
+
+  /// A province just changed hands from [fromOwner] (null = nobody) to
+  /// [toOwner]. Markets on the bordering provinces ([neighborSnaps]) trade
+  /// with one more territory if they belong to [toOwner] and one fewer if
+  /// they belong to [fromOwner]. Writes the new 'trades' counts and returns
+  /// how much each side's income per second changes by. Call it in the
+  /// write phase of a transaction (after every read).
+  ({double gain, double loss}) _shiftTrades(
+    Transaction tx,
+    Iterable<DocumentSnapshot<Map<String, dynamic>>> neighborSnaps, {
+    required String? fromOwner,
+    required String toOwner,
+  }) {
+    var gain = 0.0;
+    var loss = 0.0;
+    for (final snap in neighborSnaps) {
+      if (!snap.exists) continue;
+      final data = snap.data();
+      final building = data?['building'];
+      if (building is! Map) continue;
+      final def = GameRules.buildingById(building['type'] as String? ?? '');
+      if (def == null || !def.tradesWithNeighbors) continue;
+      final owner = data?['ownerId'];
+      final trades = (building['trades'] as num?)?.toInt() ?? 0;
+      if (owner == toOwner) {
+        tx.update(snap.reference, {'building.trades': trades + 1});
+        gain += def.goldPerPartnerPerSec;
+      } else if (fromOwner != null && owner == fromOwner && trades > 0) {
+        tx.update(snap.reference, {'building.trades': trades - 1});
+        loss += def.goldPerPartnerPerSec;
+      }
+    }
+    return (gain: gain, loss: loss);
   }
 
   double _troopsOf(DocumentSnapshot<Map<String, dynamic>> snap) =>
@@ -137,17 +173,24 @@ class FirestoreService {
   /// Real claiming will go through a Cloud Function that checks gold,
   /// adjacency, and so on.
   ///
-  /// Ownership changes the income rate (territories, and the gold mine on
-  /// the province if it has one), so each affected player's gold is
+  /// Ownership changes the income rate (territories, the building on the
+  /// province, and markets next door), so each affected player's gold is
   /// settled first and only then given the new rate. All of it happens in
-  /// one transaction.
+  /// one transaction. Like in an invasion, the building on the province is
+  /// lost. [neighborIds] are the bordering provinces, so neighboring markets
+  /// can update who they trade with.
   Future<void> claimProvince({
     required String gameId,
     required String provinceId,
     required String uid,
+    Iterable<String> neighborIds = const [],
   }) async {
     final provinceRef = _provincesRef(gameId).doc(provinceId);
     final newOwnerRef = _playerRef(gameId, uid);
+    final neighborRefs = [
+      for (final id in neighborIds.toSet())
+        if (id != provinceId) _provincesRef(gameId).doc(id),
+    ];
 
     await _db.runTransaction((tx) async {
       // Firestore transactions require every read before any write.
@@ -165,11 +208,24 @@ class FirestoreService {
         previousOwnerRef = _playerRef(gameId, previousOwnerId);
         previousOwnerSnap = await tx.get(previousOwnerRef);
       }
+      final neighborSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in neighborRefs) {
+        neighborSnaps.add(await tx.get(ref));
+      }
 
       final now = DateTime.now();
+      final shift = _shiftTrades(
+        tx,
+        neighborSnaps,
+        fromOwner: previousOwnerId,
+        toOwner: uid,
+      );
 
       if (provinceSnap.exists) {
-        tx.update(provinceRef, {'ownerId': uid});
+        tx.update(provinceRef, {
+          'ownerId': uid,
+          'building': {'type': 'none', 'level': 0},
+        });
       } else {
         tx.set(provinceRef, {
           'ownerId': uid,
@@ -185,7 +241,7 @@ class FirestoreService {
           _settledIncomeUpdate(
             newOwnerSnap,
             owned: _ownedCount(newOwnerSnap) + 1,
-            buildingIncome: _buildingIncome(newOwnerSnap) + incomeDelta,
+            buildingIncome: _buildingIncome(newOwnerSnap) + shift.gain,
             now: now,
           ),
         );
@@ -199,7 +255,8 @@ class FirestoreService {
           _settledIncomeUpdate(
             previousOwnerSnap,
             owned: _ownedCount(previousOwnerSnap) - 1,
-            buildingIncome: _buildingIncome(previousOwnerSnap) - incomeDelta,
+            buildingIncome:
+                _buildingIncome(previousOwnerSnap) - incomeDelta - shift.loss,
             now: now,
           ),
         );
@@ -209,8 +266,9 @@ class FirestoreService {
 
   /// Builds [building] on a province the player owns: pays the price,
   /// puts the building on the province, and raises the player's income if
-  /// it makes gold. [borders] is how many countries border the province (a
-  /// market earns by it). Throws [GameActionException] if it isn't allowed,
+  /// it makes gold. [neighborIds] are the bordering provinces: a market
+  /// starts out trading with the ones the player owns. Throws
+  /// [GameActionException] if it isn't allowed,
   /// including when the building doesn't fit the territory (a harbor on a
   /// landlocked country, a rig off an island archipelago).
   ///
@@ -221,14 +279,24 @@ class FirestoreService {
     required String provinceId,
     required String uid,
     required BuildingDef building,
-    required int borders,
+    required Iterable<String> neighborIds,
   }) async {
     final provinceRef = _provincesRef(gameId).doc(provinceId);
     final playerRef = _playerRef(gameId, uid);
+    final neighbors = neighborIds.toSet()..remove(provinceId);
+    // Only a market needs to know who the neighbors belong to.
+    final neighborRefs = [
+      if (building.tradesWithNeighbors)
+        for (final id in neighbors) _provincesRef(gameId).doc(id),
+    ];
 
     final error = await _db.runTransaction<String?>((tx) async {
       final provinceSnap = await tx.get(provinceRef);
       final playerSnap = await tx.get(playerRef);
+      final neighborSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in neighborRefs) {
+        neighborSnaps.add(await tx.get(ref));
+      }
 
       final data = provinceSnap.data();
       if (!provinceSnap.exists || data?['ownerId'] != uid) {
@@ -238,7 +306,11 @@ class FirestoreService {
       if (_buildingTypeOf(data) != 'none') {
         return 'This province already has a building.';
       }
-      if (!GameRules.canBuildHere(building, provinceId, borders: borders)) {
+      if (!GameRules.canBuildHere(
+        building,
+        provinceId,
+        neighbors: neighbors.length,
+      )) {
         return "You can't build a ${building.name} in this territory.";
       }
 
@@ -251,10 +323,21 @@ class FirestoreService {
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
       if (gold < building.cost) return 'Not enough gold.';
 
-      final addedIncome = building.incomeFor(borders);
+      // A market trades with the bordering territories the player owns.
+      final trades = neighborSnaps
+          .where((snap) => snap.exists && snap.data()?['ownerId'] == uid)
+          .length;
+      final addedIncome = building.incomeFor(trades);
 
       tx.update(provinceRef, {
-        'building': {'type': building.id, 'level': 1, 'borders': borders},
+        'building': {
+          'type': building.id,
+          'level': 1,
+          if (building.tradesWithNeighbors) ...{
+            'neighbors': neighbors.toList(),
+            'trades': trades,
+          },
+        },
       });
       tx.update(
         playerRef,
@@ -553,6 +636,14 @@ class FirestoreService {
         // therefore lost by the defender and never gained by the attacker.
         final hadBuilding = _buildingTypeOf(targetData) != 'none';
         final incomeDelta = _buildingIncomeOf(targetData);
+        // Markets next door: the attacker's trade with one more territory,
+        // the defender's with one fewer.
+        final shift = _shiftTrades(
+          tx,
+          borderSnaps,
+          fromOwner: defenderId,
+          toOwner: uid,
+        );
         tx.update(targetRef, {
           'ownerId': uid,
           'troops': annexedTroops,
@@ -563,7 +654,7 @@ class FirestoreService {
           ..._settledIncomeUpdate(
             attackerSnap,
             owned: _ownedCount(attackerSnap) + 1,
-            buildingIncome: _buildingIncome(attackerSnap),
+            buildingIncome: _buildingIncome(attackerSnap) + shift.gain,
             now: now,
           ),
           'lastAttackAt': attackedAt,
@@ -574,7 +665,8 @@ class FirestoreService {
             _settledIncomeUpdate(
               defenderSnap,
               owned: _ownedCount(defenderSnap) - 1,
-              buildingIncome: _buildingIncome(defenderSnap) - incomeDelta,
+              buildingIncome:
+                  _buildingIncome(defenderSnap) - incomeDelta - shift.loss,
               now: now,
             ),
           );
@@ -755,11 +847,19 @@ class FirestoreService {
           'building': {'type': 'none', 'level': 0},
         });
       }
+      // Markets next door now trade with the new territory.
+      final shift = _shiftTrades(
+        tx,
+        borderSnaps,
+        fromOwner: null,
+        toOwner: uid,
+      );
       tx.update(playerRef, {
         ..._settledIncomeUpdate(
           playerSnap,
           owned: _ownedCount(playerSnap) + 1,
-          buildingIncome: _buildingIncome(playerSnap) + _buildingIncomeOf(data),
+          buildingIncome:
+              _buildingIncome(playerSnap) + _buildingIncomeOf(data) + shift.gain,
           now: now,
           spend: cost.toDouble(),
         ),
@@ -792,10 +892,33 @@ class FirestoreService {
     final ownedDocs =
         await _provincesRef(gameId).where('ownerId', isEqualTo: uid).get();
     final owned = ownedDocs.docs.length;
+    final ownedIds = {for (final doc in ownedDocs.docs) doc.id};
+
+    // Markets earn for the bordering territories the player owns right now,
+    // so their 'trades' count is recomputed too.
+    final batch = _db.batch();
+    var tradeFixes = 0;
     var income = 0.0;
     for (final doc in ownedDocs.docs) {
-      income += _buildingIncomeOf(doc.data());
+      final docData = doc.data();
+      final building = docData['building'];
+      if (building is Map) {
+        final def = GameRules.buildingById(building['type'] as String? ?? '');
+        if (def != null && def.tradesWithNeighbors) {
+          final neighbors =
+              (building['neighbors'] as List?)?.cast<String>() ?? const [];
+          final trades = neighbors.where(ownedIds.contains).length;
+          if (trades != ((building['trades'] as num?)?.toInt() ?? 0)) {
+            batch.update(doc.reference, {'building.trades': trades});
+            tradeFixes++;
+          }
+          income += def.incomeFor(trades);
+          continue;
+        }
+      }
+      income += _buildingIncomeOf(docData);
     }
+    if (tradeFixes > 0) await batch.commit();
 
     final storedCount = (data['ownedCount'] as num?)?.toInt();
     final storedIncome = (data['buildingIncome'] as num?)?.toDouble();

@@ -26,9 +26,9 @@ class ProvinceDetailDialog extends StatefulWidget {
   final String provinceId;
   final String provinceName;
 
-  /// How many countries border this province (sea links included). A
-  /// market earns by it, and it hides the market if there are none.
-  final int borderCount;
+  /// Ids of the provinces bordering this one (sea links included). A market
+  /// earns for the ones the player owns, and is hidden if there are none.
+  final Set<String> neighborIds;
   final ValueListenable<Map<String, ProvinceState>> provinceStates;
   final ValueListenable<Map<String, PlayerState>> players;
   final FirestoreService firestore;
@@ -39,7 +39,7 @@ class ProvinceDetailDialog extends StatefulWidget {
     required this.uid,
     required this.provinceId,
     required this.provinceName,
-    required this.borderCount,
+    required this.neighborIds,
     required this.provinceStates,
     required this.players,
     required this.firestore,
@@ -130,7 +130,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         provinceId: widget.provinceId,
         uid: widget.uid,
         building: building,
-        borders: widget.borderCount,
+        neighborIds: widget.neighborIds,
       ),
       'Built ${building.name}.',
     );
@@ -225,6 +225,12 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     final gold = players[widget.uid]?.goldAt(DateTime.now()) ?? 0;
     final troops = (province?.troops ?? 0).floor();
 
+    // Bordering territories the player owns: what a market trades with.
+    final states = widget.provinceStates.value;
+    final partners = widget.neighborIds
+        .where((id) => states[id]?.ownerId == widget.uid)
+        .length;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(ConqueraSpace.md),
       child: Column(
@@ -293,6 +299,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             ..._buildSection(
               province: province,
               gold: gold,
+              partners: partners,
               buildReadyAt: players[widget.uid]?.buildReadyAt,
             ),
             const SizedBox(height: ConqueraSpace.lg),
@@ -325,6 +332,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   List<Widget> _buildSection({
     required ProvinceState? province,
     required double gold,
+    required int partners,
     required DateTime? buildReadyAt,
   }) {
     if (province != null && province.hasBuilding) {
@@ -342,7 +350,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   _LockedField(text: province.buildingLabel),
                   const SizedBox(height: ConqueraSpace.sm),
                   _ActionRow(
-                    info: def?.effectLabelFor(widget.borderCount) ?? '',
+                    info: def?.effectLabelFor(partners) ?? '',
                     unaffordable: false,
                     button: OutlinedButton(
                       onPressed:
@@ -389,7 +397,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   // Only what this territory is allowed to build.
                   items: GameRules.buildingsFor(
                     widget.provinceId,
-                    borders: widget.borderCount,
+                    neighbors: widget.neighborIds.length,
                   ),
                   name: (b) => b.name,
                   price: (b) => b.cost,
@@ -403,7 +411,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   price: pending?.cost,
                   info: pending == null
                       ? (cooling ? 'Cooling down after destroying a building' : '')
-                      : pending.effectLabelFor(widget.borderCount),
+                      : pending.effectLabelFor(partners),
                   unaffordable: unaffordable,
                   button: FilledButton(
                     onPressed: canBuild ? _build : null,
