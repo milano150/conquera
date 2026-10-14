@@ -4,7 +4,53 @@ next additions
 pre beta 1.0
 - sidebar buttons
 - more buildings and stuff.
-- europe map or smaller map 
 - NO INTEL MODE 
 - dynamic sweep for other players
 - BALANCE ECONOMY
+- fix dissapearing troops glitch
+
+
+lib/
+├── config/
+│   ├── country_data.dart
+│   ├── dev_session.dart
+│   ├── game_rules.dart
+│   ├── player_colors.dart
+│   ├── sea_links.dart
+│   └── territory_types.dart
+├── models/
+│   ├── attack_result.dart
+│   ├── player_state.dart
+│   ├── province_state.dart
+│   └── province.dart
+├── painters/
+│   └── map_painter.dart
+├── screens/
+│   ├── home_screen.dart
+│   ├── join_screen.dart
+│   └── map_screen.dart
+├── services/
+│   ├── border_finder.dart
+│   ├── firestore_service.dart
+│   ├── map_parse_result.dart
+│   └── svg_map_parser.dart
+├── state/
+│   └── map_controller.dart
+├── theme/
+│   └── conquera_theme.dart
+├── widgets/
+│   ├── attack_dialog.dart
+│   ├── blur_route.dart
+│   ├── conquera_text_field.dart
+│   ├── country_info_panel.dart
+│   ├── fade_route.dart
+│   ├── gold_amount.dart
+│   ├── leaderboard_panel.dart
+│   ├── map_viewport.dart
+│   ├── player_tag.dart
+│   ├── player_top_bar.dart
+│   ├── province_detail_dialog.dart
+│   ├── stat_block.dart
+│   └── world_sidebar.dart
+├── firebase_options.dart
+└── main.dart
