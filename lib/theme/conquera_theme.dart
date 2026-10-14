@@ -78,6 +78,14 @@ class ConqueraText {
         color: ConqueraColors.muted,
       );
 
+  /// Same type as the buttons (used by the on-map pop-ups).
+  static TextStyle get button => GoogleFonts.barlow(
+        fontSize: 14,
+        fontWeight: FontWeight.w500,
+        height: 1.2,
+        color: ConqueraColors.ink,
+      );
+
   /// Stat values.
   static TextStyle get value => GoogleFonts.barlow(
         fontSize: 15,

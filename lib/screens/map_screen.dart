@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../config/dev_session.dart';
 import '../config/game_rules.dart';
 import '../models/attack_result.dart';
+import '../models/battle_event.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
@@ -114,6 +115,16 @@ class _MapScreenState extends State<MapScreen>
   late final String _uid = DevSession.uid;
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
+  StreamSubscription<BattleEvent>? _eventsSub;
+
+  /// Attacks by other players waiting to be played on this map.
+  final List<BattleEvent> _eventQueue = [];
+  final Set<String> _seenEventIds = {};
+  bool _drainingEvents = false;
+
+  /// If true, the camera flies to other players' battles so nobody misses
+  /// the invasion and the "annexed" pop-up.
+  static const bool _cameraFollowsBattles = true;
   final ValueNotifier<Map<String, ProvinceState>> _provinceStates =
       ValueNotifier(const {});
   final ValueNotifier<Map<String, PlayerState>> _players =
@@ -202,12 +213,17 @@ class _MapScreenState extends State<MapScreen>
       (players) => _players.value = players,
       onError: (Object e) => debugPrint('Players stream error: $e'),
     );
+    _eventsSub = _firestore.watchBattleEvents(gameId: widget.gameId).listen(
+      _onBattleEvent,
+      onError: (Object e) => debugPrint('Battle events stream error: $e'),
+    );
   }
 
   @override
   void dispose() {
     _provincesSub?.cancel();
     _playersSub?.cancel();
+    _eventsSub?.cancel();
     _provinceStates.dispose();
     _players.dispose();
     _controller.dispose();
@@ -414,7 +430,7 @@ class _MapScreenState extends State<MapScreen>
     };
     return ids.any((id) {
       final s = states[id];
-      return s != null && GameRules.canAct(s.troops);
+      return s != null && GameRules.canFight(s.troops, s.buildingType);
     });
   }
 
@@ -551,7 +567,12 @@ class _MapScreenState extends State<MapScreen>
       _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
       _frozenTroops = const {}; // the troops split now
     });
-    _showPopup(target, 'annexed ', attackerColor);
+    _showPopup(
+      target,
+      'annexed ',
+      attackerColor,
+      subject: _players.value[_uid]?.displayName,
+    );
 
     await _popupAnim.forward(from: 0);
     if (!mounted) return;
@@ -830,7 +851,7 @@ class _MapScreenState extends State<MapScreen>
         _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
         _frozenTroops = const {};
       });
-      _showPopup(target, 'annexed ', attackerColor);
+      _showPopup(target, 'annexed ', attackerColor, subject: me?.displayName);
     } else {
       setState(() {
         _hiddenIds = {target.id};
@@ -869,15 +890,144 @@ class _MapScreenState extends State<MapScreen>
     });
   }
 
-  void _showPopup(Province target, String lead, Color nameColor) {
+  void _showPopup(
+    Province target,
+    String lead,
+    Color nameColor, {
+    String? subject,
+  }) {
     setState(() {
       _popup = _Popup(
         anchor: target.anchor,
+        subject: subject,
         lead: lead,
         name: target.name,
         nameColor: nameColor,
       );
     });
+  }
+
+  // --- Watching other players' battles -----------------------------------
+
+  void _onBattleEvent(BattleEvent e) {
+    if (!_seenEventIds.add(e.id)) return;
+    if (e.attackerId == _uid) return; // the attacker plays their own fight
+    final at = e.at;
+    if (at != null && DateTime.now().difference(at).inSeconds > 20) return;
+    _eventQueue.add(e);
+    _drainEvents();
+  }
+
+  /// Plays queued battles one after another, waiting for this player's own
+  /// battle (or the previous one) to finish first.
+  Future<void> _drainEvents() async {
+    if (_drainingEvents) return;
+    _drainingEvents = true;
+    try {
+      while (mounted && _eventQueue.isNotEmpty) {
+        if (_battleRunning) {
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          continue;
+        }
+        final e = _eventQueue.removeAt(0);
+        try {
+          await _spectateBattle(e);
+        } catch (err, st) {
+          debugPrint('Spectating failed: $err');
+          debugPrintStack(stackTrace: st);
+          if (mounted) _endBattle();
+        }
+      }
+    } finally {
+      _drainingEvents = false;
+    }
+  }
+
+  /// Replays [e] on this map: outlines, the sweep, and (for a conquest)
+  /// the "player annexed country" pop-up.
+  Future<void> _spectateBattle(BattleEvent e) async {
+    final target = _controller.provinceById(e.targetId);
+    if (target == null || !mounted) return;
+    final players = _players.value;
+    final attacker = players[e.attackerId];
+    final defender = e.defenderId == null ? null : players[e.defenderId];
+    final attackerColor = attacker?.color ?? ConqueraColors.accent;
+    final defenderColor = defender?.color ?? ConqueraColors.muted;
+
+    _popupAnim.stop();
+    _popupAnim.value = 0;
+    _popup = null;
+    _fx.value = 0;
+    _pulse.repeat(reverse: true);
+    setState(() {
+      // The live data already shows the result; keep the old owner's color
+      // until the sweep has played.
+      _colorOverrides = {target.id: defenderColor.withAlpha(_ownerFillAlpha)};
+      _hiddenIds = const {};
+      _battle = _battleView(
+        target: target,
+        fighterIds: e.fighterIds,
+        defenderSupportIds: e.defenderSupportIds,
+        attackerColor: attackerColor,
+        defenderColor: defenderColor,
+        outcome: BattleOutcome.pending,
+      );
+    });
+
+    if (_cameraFollowsBattles) await _panToTarget(target);
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+
+    if (e.won) {
+      setState(() {
+        _battle = _battleView(
+          target: target,
+          fighterIds: e.fighterIds,
+          defenderSupportIds: e.defenderSupportIds,
+          attackerColor: attackerColor,
+          defenderColor: defenderColor,
+          outcome: BattleOutcome.won,
+        );
+      });
+      _fx.duration = const Duration(milliseconds: 1100);
+      await _fx.forward(from: 0);
+      if (!mounted) return;
+      setState(() {
+        _colorOverrides = {target.id: attackerColor.withAlpha(_ownerFillAlpha)};
+      });
+      _showPopup(
+        target,
+        'annexed ',
+        attackerColor,
+        subject: attacker?.displayName ?? 'A player',
+      );
+    } else {
+      setState(() {
+        _hiddenIds = {target.id};
+        _battle = _battleView(
+          target: target,
+          fighterIds: e.fighterIds,
+          defenderSupportIds: e.defenderSupportIds,
+          attackerColor: attackerColor,
+          defenderColor: defenderColor,
+          outcome: BattleOutcome.lost,
+        );
+      });
+      _fx.duration = const Duration(milliseconds: 650);
+      await _fx.forward(from: 0);
+      if (!mounted) return;
+      setState(() => _hiddenIds = const {});
+      _showPopup(
+        target,
+        'failed to annex ',
+        attackerColor,
+        subject: attacker?.displayName ?? 'A player',
+      );
+    }
+
+    await _popupAnim.forward(from: 0);
+    if (!mounted) return;
+    _endBattle();
   }
 
   void _endBattle() {
@@ -999,6 +1149,8 @@ class _MapScreenState extends State<MapScreen>
                     TextSpan(
                       style: ConqueraText.name,
                       children: [
+                        if (popup.subject != null)
+                          TextSpan(text: '${popup.subject} '),
                         TextSpan(text: popup.lead),
                         TextSpan(
                           text: popup.name,
@@ -1248,12 +1400,16 @@ class _MapScreenState extends State<MapScreen>
 /// territory [name] in the attacker's color.
 class _Popup {
   final Offset anchor;
+
+  /// The player named first ("Alex annexed Peru"). Null = no subject.
+  final String? subject;
   final String lead;
   final String name;
   final Color nameColor;
 
   const _Popup({
     required this.anchor,
+    this.subject,
     required this.lead,
     required this.name,
     required this.nameColor,

@@ -58,6 +58,9 @@ class BuildingDef {
   /// borders this one (a radar). Sea links count as borders.
   final bool revealsNeighbors;
 
+  /// The province can't send troops to attacks or claims (a wall).
+  final bool blocksAttacks;
+
   const BuildingDef({
     required this.id,
     required this.name,
@@ -70,6 +73,7 @@ class BuildingDef {
     this.supportsAttacks = false,
     this.effect,
     this.revealsNeighbors = false,
+    this.blocksAttacks = false,
   });
 
   /// True if what this building earns depends on how many bordering
@@ -163,6 +167,11 @@ class GameRules {
   /// claim. Matches the whole numbers shown on the map (1.9 shows as 1).
   static bool canAct(double troops) => troops >= minPowerToAct;
 
+  /// True if a province with [troops] power and [buildingType] may fight:
+  /// it has enough power and doesn't hold a wall.
+  static bool canFight(double troops, String buildingType) =>
+      canAct(troops) && !(buildingById(buildingType)?.blocksAttacks ?? false);
+
   /// Taxes: every territory a player owns earns this much gold per second.
   static const double goldPerTerritoryPerSec = 0.0005;
 
@@ -219,14 +228,16 @@ class GameRules {
     icon: Icons.security,
     cost: 90,
     defenseBonus: 2.0,
-    effect: 'triples this province\'s power when invaded (3x)',
+    blocksAttacks: true,
+    effect: 'triples this province\'s power when invaded (3x), but it '
+        'can\'t attack or claim',
   );
 
   /// Lifts the fog of war over every bordering territory.
   static const BuildingDef radar = BuildingDef(
     id: 'radar',
     name: 'Radar',
-    icon: Icons.settings_input_antenna,
+    icon: Icons.radar,
     cost: 55,
     revealsNeighbors: true,
     effect: 'shows the buildings and power of bordering territories',

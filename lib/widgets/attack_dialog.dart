@@ -97,7 +97,7 @@ class _AttackDialogState extends State<AttackDialog> {
         // Still counts as a bordering province a barracks can link to, but
         // with only 1 power it doesn't fight.
         ownedBorders.add(id);
-        if (!GameRules.canAct(state.troops)) continue;
+        if (!GameRules.canFight(state.troops, state.buildingType)) continue;
         fighters.add(id);
         power += state.troops;
         direct.add((

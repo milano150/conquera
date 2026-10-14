@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../config/game_rules.dart';
+import '../models/battle_event.dart';
 import '../models/attack_result.dart';
 import '../models/player_state.dart';
 import '../models/province_state.dart';
@@ -61,6 +62,23 @@ class FirestoreService {
           (snap) => {
             for (final doc in snap.docs) doc.id: ProvinceState.fromDoc(doc),
           },
+        );
+  }
+
+  /// Every attack that gets resolved, so all players can watch it happen.
+  /// The first snapshot replays recent history; callers skip old events.
+  Stream<BattleEvent> watchBattleEvents({required String gameId}) {
+    return _gameRef(gameId)
+        .collection('events')
+        .orderBy('at', descending: true)
+        .limit(5)
+        .snapshots()
+        .expand(
+          (snap) => [
+            for (final c in snap.docChanges)
+              if (c.type == DocumentChangeType.added)
+                BattleEvent.fromDoc(c.doc),
+          ],
         );
   }
 
@@ -567,11 +585,12 @@ class FirestoreService {
       // Provinces with only 1 power can't attack; they stay as they are.
       final fighters = [
         for (final snap in bordering)
-          if (GameRules.canAct(_troopsOf(snap))) snap,
+          if (GameRules.canFight(_troopsOf(snap), _buildingTypeOf(snap.data())))
+            snap,
         ...supporters,
       ];
       if (fighters.isEmpty) {
-        error = "Provinces with only 1 power can't attack.";
+        error = "Provinces with only 1 power or a wall can't attack.";
         return;
       }
 
@@ -718,6 +737,20 @@ class FirestoreService {
           defenderPowerLeft: left,
         );
       }
+
+      // Tell everyone in the game, so they can watch the invasion too.
+      final r = result;
+      if (r != null) {
+        tx.set(_gameRef(gameId).collection('events').doc(), {
+          'attackerId': uid,
+          'defenderId': defenderId,
+          'targetId': targetId,
+          'won': r.won,
+          'fighterIds': r.fighterIds,
+          'defenderSupportIds': r.defenderSupportIds,
+          'at': FieldValue.serverTimestamp(),
+        });
+      }
     });
 
     final failure = error;
@@ -784,7 +817,7 @@ class FirestoreService {
           if (snap.exists &&
               snap.data()?['ownerId'] == uid &&
               !GameRules.supportsAttacks(_buildingTypeOf(snap.data())) &&
-              GameRules.canAct(_troopsOf(snap)))
+              GameRules.canFight(_troopsOf(snap), _buildingTypeOf(snap.data())))
             snap,
       ];
       // No such province: a bordering barracks can pay for the claim instead.
