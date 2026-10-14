@@ -54,6 +54,10 @@ class BuildingDef {
   /// Short description shown in the province window. Null = the gold text.
   final String? effect;
 
+  /// The owner can see the buildings and power of every territory that
+  /// borders this one (a radar). Sea links count as borders.
+  final bool revealsNeighbors;
+
   const BuildingDef({
     required this.id,
     required this.name,
@@ -65,6 +69,7 @@ class BuildingDef {
     this.defenseBonus = 0,
     this.supportsAttacks = false,
     this.effect,
+    this.revealsNeighbors = false,
   });
 
   /// True if what this building earns depends on how many bordering
@@ -207,6 +212,26 @@ class GameRules {
     effect: 'makes this province 50% harder to invade',
   );
 
+  /// Triples the power of the province when it is invaded (+200%).
+  static const BuildingDef wall = BuildingDef(
+    id: 'wall',
+    name: 'Wall',
+    icon: Icons.security,
+    cost: 90,
+    defenseBonus: 2.0,
+    effect: 'triples this province\'s power when invaded (3x)',
+  );
+
+  /// Lifts the fog of war over every bordering territory.
+  static const BuildingDef radar = BuildingDef(
+    id: 'radar',
+    name: 'Radar',
+    icon: Icons.settings_input_antenna,
+    cost: 55,
+    revealsNeighbors: true,
+    effect: 'shows the buildings and power of bordering territories',
+  );
+
   static const BuildingDef barracks = BuildingDef(
     id: 'barracks',
     name: 'Barracks',
@@ -222,6 +247,8 @@ class GameRules {
     fishingHarbor,
     offshoreRig,
     fortress,
+    wall,
+    radar,
     barracks,
   ];
 
@@ -260,9 +287,13 @@ class GameRules {
   static const Duration buildCooldownAfterDestroy = Duration(minutes: 1);
 
   /// How much stronger a province is when invaded: 1.5 with a fortress,
-  /// 1.0 otherwise.
+  /// 3.0 with a wall, 1.0 otherwise.
   static double defenseMultiplier(String buildingType) =>
       1 + (buildingById(buildingType)?.defenseBonus ?? 0);
+
+  /// True for a building (radar) that reveals bordering territories.
+  static bool revealsNeighbors(String buildingType) =>
+      buildingById(buildingType)?.revealsNeighbors ?? false;
 
   /// True for a building (barracks) that joins bordering provinces' attacks.
   static bool supportsAttacks(String buildingType) =>

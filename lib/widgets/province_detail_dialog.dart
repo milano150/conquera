@@ -29,6 +29,9 @@ class ProvinceDetailDialog extends StatefulWidget {
   /// Ids of the provinces bordering this one (sea links included). A market
   /// earns for the ones the player owns, and is hidden if there are none.
   final Set<String> neighborIds;
+
+  /// True if a radar lets the player see this province's power and building.
+  final bool canSee;
   final ValueListenable<Map<String, ProvinceState>> provinceStates;
   final ValueListenable<Map<String, PlayerState>> players;
   final FirestoreService firestore;
@@ -40,6 +43,7 @@ class ProvinceDetailDialog extends StatefulWidget {
     required this.provinceId,
     required this.provinceName,
     required this.neighborIds,
+    this.canSee = false,
     required this.provinceStates,
     required this.players,
     required this.firestore,
@@ -277,12 +281,14 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               ),
               StatBlock(
                 label: 'Power',
-                child: Text('$troops', style: ConqueraText.value),
+                child: Text(ownedByMe || widget.canSee ? '$troops' : '?', style: ConqueraText.value),
               ),
               StatBlock(
                 label: 'Building',
                 child: Text(
-                  province?.buildingLabel ?? 'None',
+                  ownedByMe || widget.canSee
+                      ? (province?.buildingLabel ?? 'None')
+                      : '?',
                   style: ConqueraText.value,
                 ),
               ),

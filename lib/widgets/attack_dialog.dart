@@ -25,6 +25,9 @@ class AttackDialog extends StatefulWidget {
   /// Every province that borders the target (not only the player's).
   final Set<String> neighborIds;
 
+  /// True if a radar already shows the target's power and buildings.
+  final bool targetVisible;
+
   /// Barracks the player owns that may join the attack: candidate province
   /// id -> the player's bordering provinces it touches.
   final Map<String, Set<String>> supportLinks;
@@ -40,6 +43,7 @@ class AttackDialog extends StatefulWidget {
     required this.targetId,
     required this.targetName,
     required this.neighborIds,
+    this.targetVisible = false,
     required this.supportLinks,
     required this.provinceNames,
     required this.provinceStates,
@@ -67,6 +71,11 @@ class _AttackDialogState extends State<AttackDialog> {
   late final List<_Line> _defenderLines;
   late final PlayerState? _me;
   late final PlayerState? _defender;
+
+  /// The defender's power and buildings stay hidden (fog of war) until the
+  /// attack is confirmed.
+  late bool _revealed = widget.targetVisible;
+  bool _confirming = false;
 
   @override
   void initState() {
@@ -147,12 +156,14 @@ class _AttackDialogState extends State<AttackDialog> {
     defenderSupport.sort((a, b) => b.power.compareTo(a.power));
 
     _attackPower = power;
+    final defenseBonusPower = (target?.troops ?? 0) * (defenseMultiplier - 1);
     _defendPower = (target?.troops ?? 0) * defenseMultiplier + supportPower;
     _defenderLines = [
       _Line(widget.targetName),
       if (defenseMultiplier > 1 && defenseDef != null)
         _Line(
-          '${defenseDef.name} +${((defenseMultiplier - 1) * 100).round()}%',
+          '${defenseDef.name} +${defenseBonusPower.floor()} power '
+          '(x${defenseMultiplier.toStringAsFixed(defenseMultiplier % 1 == 0 ? 0 : 1)})',
           icon: defenseDef.icon,
         ),
       for (final s in defenderSupport) _Line(s.text, icon: s.icon),
@@ -167,12 +178,27 @@ class _AttackDialogState extends State<AttackDialog> {
 
   /// Each side's share of the total power, for the bar.
   double get _powerShare {
+    if (!_revealed) return 0.5;
     final total = _attackPower + _defendPower;
     return total <= 0 ? 0.5 : _attackPower / total;
   }
 
   /// Closes the window and hands the fighters to the map screen.
-  void _confirm() => Navigator.of(context).pop(_fighterIds);
+  void _confirm() {
+    if (widget.targetVisible) {
+      Navigator.of(context).pop(_fighterIds);
+      return;
+    }
+    if (_confirming) return;
+    setState(() {
+      _confirming = true;
+      _revealed = true;
+    });
+    // Let the player see what they are up against before the fight starts.
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      if (mounted) Navigator.of(context).pop(_fighterIds);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -238,7 +264,10 @@ class _AttackDialogState extends State<AttackDialog> {
                           color: _defender?.color,
                         ),
                         power: _defendPower,
-                        lines: _defenderLines,
+                        hidden: !_revealed,
+                        lines: _revealed
+                            ? _defenderLines
+                            : [_Line(widget.targetName)],
                       ),
                     ),
                   ],
@@ -263,12 +292,12 @@ class _AttackDialogState extends State<AttackDialog> {
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _confirming ? null : () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
         const SizedBox(width: ConqueraSpace.sm),
         OutlinedButton(
-          onPressed: _attackPower > 0 ? _confirm : null,
+          onPressed: _attackPower > 0 && !_confirming ? _confirm : null,
           style: OutlinedButton.styleFrom(
             foregroundColor: ConqueraColors.danger,
             side: BorderSide(
@@ -289,6 +318,7 @@ class _AttackDialogState extends State<AttackDialog> {
     required Widget tag,
     required double power,
     required List<_Line> lines,
+    bool hidden = false,
   }) {
     return Column(
       crossAxisAlignment: align,
@@ -296,7 +326,7 @@ class _AttackDialogState extends State<AttackDialog> {
         tag,
         const SizedBox(height: ConqueraSpace.xs),
         Text(
-          '${power.floor()}',
+          hidden ? '?' : '${power.floor()}',
           style: ConqueraText.figure.copyWith(fontSize: 36),
         ),
         for (final line in lines)

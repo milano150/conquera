@@ -143,6 +143,10 @@ class _MapScreenState extends State<MapScreen>
   /// shows 0 (e.g. the territory being claimed).
   Map<String, double> _frozenTroops = const {};
 
+  /// Enemy power shown for a moment after a failed attack (province id ->
+  /// troops left), then hidden again.
+  Map<String, int> _revealedPower = const {};
+
   Map<String, double> _snapshotTroops() => {
         for (final e in _provinceStates.value.entries) e.key: e.value.troops,
       };
@@ -333,6 +337,24 @@ class _MapScreenState extends State<MapScreen>
     return colors;
   }
 
+  /// Fog of war: you see your own provinces, plus every province that
+  /// borders one of your radars.
+  bool _canSee(String id) {
+    final states = _provinceStates.value;
+    final s = states[id];
+    if (s == null) return false;
+    if (s.ownerId == _uid) return true;
+    for (final n in _controller.neighborsOf(id)) {
+      final ns = states[n];
+      if (ns != null &&
+          ns.ownerId == _uid &&
+          GameRules.revealsNeighbors(ns.buildingType)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// What to draw on top of each province: its building's icon and its
   /// power. Provinces with neither get no badge.
   List<MapBadge> _badges() {
@@ -341,6 +363,23 @@ class _MapScreenState extends State<MapScreen>
       final province = _controller.provinceById(id);
       if (province == null) return;
 
+      // Briefly show what is left of a province you just failed to take.
+      final revealed = _revealedPower[id];
+      if (revealed != null && state.ownerId != _uid) {
+        badges.add(
+          MapBadge(
+            anchor: province.anchor,
+            power: revealed,
+            extent: sqrt(province.bounds.width * province.bounds.height),
+            color: _players.value[state.ownerId]?.color,
+          ),
+        );
+        return;
+      }
+
+      // Fog of war: only provinces you own or see with a radar show a
+      // building and power.
+      if (!_canSee(id)) return;
       final icon = state.hasBuilding
           ? GameRules.buildingById(state.buildingType)?.icon
           : null;
@@ -612,6 +651,7 @@ class _MapScreenState extends State<MapScreen>
         targetName: target.name,
         neighborIds: _controller.neighborsOf(target.id),
         supportLinks: _supportLinks(target),
+        targetVisible: _canSee(target.id),
         provinceNames: {
           for (final p in _controller.provinces) p.id: p.name,
         },
@@ -811,12 +851,22 @@ class _MapScreenState extends State<MapScreen>
         _frozenTroops = const {};
       });
       _showPopup(target, 'Failed to annex ', attackerColor);
+      _revealLeftover(target.id, result.defenderPowerLeft);
     }
 
     // Keep the outlines up while the pop-up is read, then clear everything.
     await _popupAnim.forward(from: 0);
     if (!mounted) return;
     _endBattle();
+  }
+
+  /// Shows the defender's remaining power on the map for a second.
+  void _revealLeftover(String id, double left) {
+    setState(() => _revealedPower = {id: left.floor()});
+    Future.delayed(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      setState(() => _revealedPower = const {});
+    });
   }
 
   void _showPopup(Province target, String lead, Color nameColor) {
@@ -852,6 +902,7 @@ class _MapScreenState extends State<MapScreen>
         provinceId: province.id,
         provinceName: province.name,
         neighborIds: _controller.neighborsOf(province.id),
+        canSee: _canSee(province.id),
         provinceStates: _provinceStates,
         players: _players,
         firestore: _firestore,
@@ -1156,8 +1207,12 @@ class _MapScreenState extends State<MapScreen>
                                         ? 'Unknown player'
                                         : null),
                                 ownerColor: selectedOwner?.color,
-                                power: '${(selectedState?.troops ?? 0).floor()}',
-                                building: selectedState?.buildingLabel ?? 'None',
+                                power: _canSee(selected.id)
+                                    ? '${(selectedState?.troops ?? 0).floor()}'
+                                    : '?',
+                                building: _canSee(selected.id)
+                                    ? (selectedState?.buildingLabel ?? 'None')
+                                    : '?',
                                 onClose: _controller.clearSelection,
                                 onOpenDetails: () => _openDetails(selected),
                                 isEnemy: isEnemy,
