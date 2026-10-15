@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../config/dev_session.dart';
+import '../config/saved_world.dart';
 import '../config/game_rules.dart';
+import '../services/server_clock.dart';
 import '../models/attack_result.dart';
 import '../models/battle_event.dart';
 import '../models/player_state.dart';
@@ -116,7 +118,7 @@ class _MapScreenState extends State<MapScreen>
   // Live game data. Notifiers (instead of plain fields) so the province
   // window can listen to the same data without opening its own streams.
   final FirestoreService _firestore = FirestoreService();
-  late final String _uid = DevSession.uid;
+  late final String _uid = FirebaseAuth.instance.currentUser!.uid;
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
@@ -428,6 +430,7 @@ class _MapScreenState extends State<MapScreen>
   /// goes back to the home screen.
   Future<void> _quit() async {
     await _firestore.quitWorld(gameId: widget.gameId, uid: _uid);
+    await SavedWorld.clear();
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
@@ -573,7 +576,7 @@ class _MapScreenState extends State<MapScreen>
                 alignment: PlaceholderAlignment.middle,
                 child: GoldAmount(cost, style: ConqueraText.value),
               ),
-              const TextSpan(text: ' and starts your attack cooldown.'),
+              const TextSpan(text: '.'),
             ],
           ),
         ),
@@ -1019,7 +1022,7 @@ class _MapScreenState extends State<MapScreen>
     if (!_seenEventIds.add(e.id)) return;
     if (e.attackerId == _uid) return; // the attacker plays their own fight
     final at = e.at;
-    if (at != null && DateTime.now().difference(at).inSeconds > 20) return;
+    if (at != null && ServerClock.now().difference(at).inSeconds > 20) return;
     _eventQueue.add(e);
     _drainEvents();
   }
@@ -1169,28 +1172,6 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  /// DEBUG ONLY: Space claims the selected country for the local player.
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (!kDebugMode) return KeyEventResult.ignored;
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.space) {
-      return KeyEventResult.ignored;
-    }
-
-    final provinceId = _controller.selectedProvinceId;
-    if (provinceId == null) return KeyEventResult.ignored;
-
-    _firestore
-        .claimProvince(
-          gameId: widget.gameId,
-          provinceId: provinceId,
-          uid: _uid,
-          neighborIds: _controller.neighborsOf(provinceId),
-        )
-        .catchError((Object e) => debugPrint('Claim failed: $e'));
-    return KeyEventResult.handled;
-  }
-
   void _onPointerDown(PointerDownEvent e) => _pointerDown = e.position;
 
   void _onPointerUp(PointerUpEvent e) {
@@ -1330,10 +1311,7 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      onKeyEvent: _onKey,
-      child: Stack(
+    return Stack(
         fit: StackFit.expand,
         children: [
           Scaffold(
@@ -1563,7 +1541,6 @@ class _MapScreenState extends State<MapScreen>
             ),
           ),
         ],
-      ),
     );
   }
 }

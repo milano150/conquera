@@ -1,7 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../config/dev_session.dart';
+import '../config/saved_world.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
 import '../widgets/fade_route.dart';
@@ -16,7 +17,10 @@ import 'map_screen.dart';
 /// A returning player (they already picked a name and color in that world)
 /// goes straight to the map; a new one goes to [JoinScreen].
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// A world to open right away (the one saved from the last session).
+  final String? autoEnterWorldId;
+
+  const HomeScreen({super.key, this.autoEnterWorldId});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -27,6 +31,18 @@ class _HomeScreenState extends State<HomeScreen> {
   final FirestoreService _service = FirestoreService();
   bool _busy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final saved = widget.autoEnterWorldId;
+    if (saved != null) {
+      _worldId.text = saved;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _enter();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -44,12 +60,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // Entering from here always uses this device's own account; the beta
-      // "log in as" on the join screen sets an override again if needed.
-      DevSession.reset();
-      final uid = DevSession.uid;
+      final uid = FirebaseAuth.instance.currentUser!.uid;
 
       if (!await _service.worldExists(worldId)) {
+        await SavedWorld.clear();
         if (mounted) setState(() => _error = 'No world with that id.');
         return;
       }
@@ -114,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ConqueraTextField(
                     controller: _worldId,
                     hint: 'enter world_id',
-                    autofocus: true,
+                    autofocus: widget.autoEnterWorldId == null,
                     textInputAction: TextInputAction.go,
                     onChanged: (_) {
                       if (_error != null) setState(() => _error = null);

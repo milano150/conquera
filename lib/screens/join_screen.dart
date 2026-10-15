@@ -1,9 +1,9 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../config/dev_session.dart';
 import '../config/player_colors.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
@@ -39,8 +39,6 @@ class _JoinScreenState extends State<JoinScreen> {
   /// who picked it. Those swatches are locked.
   Map<String, PlayerState> _taken = const {};
 
-  /// Everyone in the lobby, for the beta "log in as" list.
-  List<PlayerState> _players = const [];
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
 
   /// The locked color whose owner is being shown above its swatch.
@@ -54,7 +52,6 @@ class _JoinScreenState extends State<JoinScreen> {
       (players) {
         if (!mounted) return;
         setState(() {
-          _players = players.values.toList();
           _taken = {
             for (final p in players.values) p.colorHex.toUpperCase(): p,
           };
@@ -107,7 +104,7 @@ class _JoinScreenState extends State<JoinScreen> {
     });
 
     try {
-      final uid = DevSession.uid;
+      final uid = FirebaseAuth.instance.currentUser!.uid;
       final map = await SvgMapParser.parseAsset(MapScreen.defaultAssetPath);
 
       final spawn = await _service.joinWorld(
@@ -135,15 +132,6 @@ class _JoinScreenState extends State<JoinScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  /// BETA: act as an existing player of this world and go to the map.
-  Future<void> _loginAs(String uid) async {
-    if (_busy) return;
-    DevSession.actAs(uid);
-    await Navigator.of(context).pushReplacement(
-      FadeRoute<void>(builder: (_) => MapScreen(gameId: widget.gameId)),
-    );
   }
 
   @override
@@ -236,77 +224,12 @@ class _JoinScreenState extends State<JoinScreen> {
                             ),
                           ),
                   ),
-                  const SizedBox(height: ConqueraSpace.lg),
-                  _BetaPlayers(
-                    players: _players,
-                    onPick: _busy ? null : _loginAs,
-                  ),
                 ],
               ),
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-/// BETA: the players already in the lobby, tap one to log in as them.
-class _BetaPlayers extends StatelessWidget {
-  final List<PlayerState> players;
-  final ValueChanged<String>? onPick;
-
-  const _BetaPlayers({required this.players, required this.onPick});
-
-  @override
-  Widget build(BuildContext context) {
-    final sorted = [...players]..sort(
-        (a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
-      );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Divider(color: ConqueraColors.divider, height: 1),
-        const SizedBox(height: ConqueraSpace.md),
-        Text(
-          'BETA · LOG IN AS',
-          textAlign: TextAlign.center,
-          style: ConqueraText.label.copyWith(
-            fontWeight: FontWeight.w500,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: ConqueraSpace.sm),
-        if (sorted.isEmpty)
-          Text(
-            'nobody in this lobby yet',
-            textAlign: TextAlign.center,
-            style: ConqueraText.label,
-          )
-        else
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: ConqueraSpace.sm,
-            runSpacing: ConqueraSpace.sm,
-            children: [
-              for (final p in sorted)
-                OutlinedButton(
-                  onPressed: onPick == null ? null : () => onPick!(p.uid),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 32),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    side: const BorderSide(color: ConqueraColors.divider),
-                  ),
-                  child: PlayerTag(
-                    name: p.displayName,
-                    color: p.color,
-                    style: ConqueraText.value,
-                  ),
-                ),
-            ],
-          ),
-      ],
     );
   }
 }

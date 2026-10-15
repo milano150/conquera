@@ -37,9 +37,8 @@ class HowToPlayScreen extends StatelessWidget {
       'Claiming land',
       'A bordering territory that nobody owns can be claimed for '
           '${GameRules.claimCost} gold. Sea links count as borders, so '
-          'islands and far coasts can be reachable too. A claim counts as an '
-          'attack, so it starts the attack cooldown of '
-          '${GameRules.attackCooldown.inSeconds} seconds.',
+          'islands and far coasts can be reachable too. Claiming has no '
+          'cooldown.',
     ),
     (
       'Attacking',
@@ -49,8 +48,8 @@ class HowToPlayScreen extends StatelessWidget {
           'each fighting province loses '
           '${(GameRules.failedAttackLossShare * 100).round()}% of its '
           'power, and the defence loses the same total amount. After any '
-          'attack you must wait ${GameRules.attackCooldown.inSeconds} '
-          'seconds before the next one.',
+          'attack you must wait ${GameRules.attackCooldown.inMinutes} '
+          'minutes before the next one.',
     ),
     (
       'Buildings',
@@ -61,7 +60,7 @@ class HowToPlayScreen extends StatelessWidget {
           'launched from bordering territories of yours, and a radar shows '
           'the buildings and power of the territories around it. If you '
           'destroy a building, you cannot build anything for '
-          '${GameRules.buildCooldownAfterDestroy.inMinutes} minute.',
+          '${GameRules.buildCooldownAfterDestroy.inMinutes} minutes.',
     ),
     (
       'Defending',

@@ -9,6 +9,7 @@ import '../models/attack_result.dart';
 import '../models/player_state.dart';
 import '../models/province_state.dart';
 import '../models/update_entry.dart';
+import 'server_clock.dart';
 
 /// A game action that was refused for a normal reason (not enough gold,
 /// not your province, ...). [message] is safe to show to the player.
@@ -280,7 +281,7 @@ class FirestoreService {
         neighborSnaps.add(await tx.get(ref));
       }
 
-      final now = DateTime.now();
+      final now = ServerClock.now();
       final shift = _shiftTrades(
         tx,
         neighborSnaps,
@@ -381,7 +382,7 @@ class FirestoreService {
         return "You can't build a ${building.name} in this territory.";
       }
 
-      final now = DateTime.now();
+      final now = ServerClock.now();
       final buildReadyAt = PlayerState.fromDoc(playerSnap).buildReadyAt;
       if (buildReadyAt != null && now.isBefore(buildReadyAt)) {
         final secs = (buildReadyAt.difference(now).inMilliseconds / 1000).ceil();
@@ -457,7 +458,7 @@ class FirestoreService {
       tx.update(provinceRef, {
         'building': {'type': 'none', 'level': 0},
       });
-      final now = DateTime.now();
+      final now = ServerClock.now();
       tx.update(playerRef, {
         ..._settledIncomeUpdate(
           playerSnap,
@@ -502,7 +503,7 @@ class FirestoreService {
       }
       if (!playerSnap.exists) return 'Player not found.';
 
-      final now = DateTime.now();
+      final now = ServerClock.now();
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
       if (gold < unit.cost) return 'Not enough gold.';
 
@@ -620,11 +621,12 @@ class FirestoreService {
         return;
       }
 
-      final now = DateTime.now();
+      final now = ServerClock.now();
       final readyAt = PlayerState.fromDoc(attackerSnap).attackReadyAt;
       if (readyAt != null && now.isBefore(readyAt)) {
         final secs = (readyAt.difference(now).inMilliseconds / 1000).ceil();
-        error = 'Your troops are still recovering ($secs s left).';
+        error = 'Your troops are still recovering '
+            '(${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')} left).';
         return;
       }
 
@@ -888,9 +890,9 @@ class FirestoreService {
 
   /// Buys a bordering unclaimed province for [GameRules.claimCost] gold.
   /// [neighborIds] are the province's bordering provinces (from the map
-  /// geometry plus sea links); at least one must belong to [uid]. Counts as
-  /// an attack: the attack cooldown starts. Throws [GameActionException] if
-  /// it isn't allowed.
+  /// geometry plus sea links); at least one must belong to [uid]. Claiming
+  /// neither waits for nor starts the attack cooldown. Throws
+  /// [GameActionException] if it isn't allowed.
   ///
   /// Provinces with only 1 power can't claim. The new province's power comes
   /// from the bordering non-barracks provinces with 2+ power (they split
@@ -924,13 +926,8 @@ class FirestoreService {
       if (!playerSnap.exists) return 'Player not found.';
       if (data?['ownerId'] != null) return 'This province is already owned.';
 
-      final now = DateTime.now();
+      final now = ServerClock.now();
       final player = PlayerState.fromDoc(playerSnap);
-      final readyAt = player.attackReadyAt;
-      if (readyAt != null && now.isBefore(readyAt)) {
-        final secs = (readyAt.difference(now).inMilliseconds / 1000).ceil();
-        return 'Your troops are still recovering ($secs s left).';
-      }
 
       final bordersMine = borderSnaps.any(
         (snap) => snap.exists && snap.data()?['ownerId'] == uid,
@@ -1023,7 +1020,6 @@ class FirestoreService {
           now: now,
           spend: cost.toDouble(),
         ),
-        'lastAttackAt': Timestamp.fromDate(now),
       });
       return null;
     });
@@ -1097,7 +1093,7 @@ class FirestoreService {
         snap,
         owned: owned,
         buildingIncome: income,
-        now: DateTime.now(),
+        now: ServerClock.now(),
       ),
     );
     debugPrint('Income reconciled: $owned territories, '

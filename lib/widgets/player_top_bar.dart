@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/player_state.dart';
 import '../services/firestore_service.dart';
+import '../services/server_clock.dart';
 import '../theme/conquera_theme.dart';
 import 'gold_amount.dart';
 import 'player_tag.dart';
@@ -101,7 +102,7 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
                       child: Align(
                         alignment: Alignment.centerRight,
                         child: _GoldReadout(
-                          gold: player?.goldAt(DateTime.now()),
+                          gold: player?.goldAt(ServerClock.now()),
                           rate: player?.goldRate,
                         ),
                       ),

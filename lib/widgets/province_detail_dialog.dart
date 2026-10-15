@@ -7,6 +7,7 @@ import '../config/game_rules.dart';
 import '../models/player_state.dart';
 import '../models/province_state.dart';
 import '../services/firestore_service.dart';
+import '../services/server_clock.dart';
 import '../theme/conquera_theme.dart';
 import 'gold_amount.dart';
 import 'player_tag.dart';
@@ -85,7 +86,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   /// Time left until [readyAt] (zero if null or already past).
   Duration _remaining(DateTime? readyAt) {
     if (readyAt == null) return Duration.zero;
-    final left = readyAt.difference(DateTime.now());
+    final left = readyAt.difference(ServerClock.now());
     return left.isNegative ? Duration.zero : left;
   }
 
@@ -226,7 +227,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     final owner = ownerId == null ? null : players[ownerId];
     final ownedByMe = ownerId != null && ownerId == widget.uid;
 
-    final gold = players[widget.uid]?.goldAt(DateTime.now()) ?? 0;
+    final gold = players[widget.uid]?.goldAt(ServerClock.now()) ?? 0;
     final troops = (province?.troops ?? 0).floor();
 
     // Bordering territories the player owns: what a market trades with.

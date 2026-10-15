@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/player_state.dart';
 import '../models/province_state.dart';
+import '../config/saved_world.dart';
 import '../theme/conquera_theme.dart';
 import 'leaderboard_panel.dart';
 
@@ -224,7 +225,10 @@ class _PanelState extends State<_Panel> {
           padding: const EdgeInsets.all(ConqueraSpace.md),
           child: OutlinedButton(
             // Back to the home screen (first route in the stack).
-            onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+            onPressed: () {
+              SavedWorld.clear(); // don't reopen this world on next launch
+              Navigator.of(context).popUntil((r) => r.isFirst);
+            },
             style: OutlinedButton.styleFrom(
               foregroundColor: ConqueraColors.danger,
               side: const BorderSide(color: ConqueraColors.danger),

@@ -143,8 +143,8 @@ class GameRules {
   // and pays back through tax and its building slot over many hours.
   // Units are untouched: a squad is 10 gold, so one mine is 1.6 squads.
 
-  /// Gold price of claiming a bordering unclaimed province. Claiming counts
-  /// as an attack, so it starts the attack cooldown too.
+  /// Gold price of claiming a bordering unclaimed province. Claiming does
+  /// not start (or wait for) the attack cooldown.
   static const int claimCost = 25;
 
   /// Gold a player starts with when joining a world: enough for a squad, a
@@ -155,7 +155,7 @@ class GameRules {
   static const double startingTroops = 10;
 
   /// How long a player must wait between attacks (win or lose).
-  static const Duration attackCooldown = Duration(seconds: 2);
+  static const Duration attackCooldown = Duration(hours: 1);
 
   /// Share of the troops each fighting province loses when an attack
   /// fails (the defence loses the same total amount).
@@ -298,7 +298,7 @@ class GameRules {
 
   /// After destroying a building, a player must wait this long before
   /// building anything again.
-  static const Duration buildCooldownAfterDestroy = Duration(minutes: 1);
+  static const Duration buildCooldownAfterDestroy = Duration(minutes: 5);
 
   /// How much stronger a province is when invaded: 1.5 with a fortress,
   /// 3.0 with a wall, 1.0 otherwise.

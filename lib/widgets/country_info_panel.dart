@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../config/game_rules.dart';
+import '../services/server_clock.dart';
 import '../theme/conquera_theme.dart';
 import 'gold_amount.dart';
 import 'player_tag.dart';
@@ -149,7 +150,7 @@ class CountryInfoPanel extends StatelessWidget {
                           price: GameRules.claimCost,
                           color: ConqueraColors.accent,
                           enabled: canSplit,
-                          readyAt: attackReadyAt,
+                          readyAt: null, // claiming has no cooldown
                           hint: null,
                           onPressed: onClaim,
                         ),
@@ -223,7 +224,7 @@ class _ActionButtonState extends State<_ActionButton> {
   Duration _left() {
     final ready = widget.readyAt;
     if (ready == null) return Duration.zero;
-    final left = ready.difference(DateTime.now());
+    final left = ready.difference(ServerClock.now());
     return left.isNegative ? Duration.zero : left;
   }
 
