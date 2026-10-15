@@ -198,9 +198,11 @@ class BattleView {
 ///  * on a win, a circle that grows over the target from the side the attack
 ///    comes from ([BattleView.sweepDirection]), turning it from the defender's
 ///    color to the attacker's;
-///  * on a loss, a shake of the target (the base layer hides it meanwhile).
+///  * on a loss, the same sweep goes halfway across the target, then pulls
+///    back twice as fast (the base layer hides the target meanwhile).
 ///
-/// [fx] runs 0..1 for the sweep or the shake. [pulse] drives the outline.
+/// [fx] runs 0..1 for the sweep (a loss uses the same value for the advance
+/// and the retreat). [pulse] drives the outline.
 /// Line widths are divided by the zoom so they stay the same on screen.
 class BattlePainter extends CustomPainter {
   final BattleView view;
@@ -208,9 +210,8 @@ class BattlePainter extends CustomPainter {
   final Animation<double> fx;
   final TransformationController transform;
 
-  static const double _casingPx = 4.6;
-  static const double _corePx = 2.6;
-  static const double _shakePx = 5;
+  static const double _casingPx = 3.0;
+  static const double _corePx = 1.6;
 
   BattlePainter({
     required this.view,
@@ -239,16 +240,14 @@ class BattlePainter extends CustomPainter {
     final scale = transform.value.getMaxScaleOnAxis();
     if (scale <= 0) return;
 
-    var shift = Offset.zero;
     final t = fx.value;
 
     if (view.outcome == BattleOutcome.won && t > 0) {
-      _paintSweep(canvas, scale, t);
+      _paintSweep(canvas, Curves.easeInOutSine.transform(t.clamp(0.0, 1.0)));
     } else if (view.outcome == BattleOutcome.lost) {
-      // Damped wobble: 5 swings, fading out.
-      final wobble = sin(t * pi * 10) * (1 - t) * _shakePx / scale;
-      shift = Offset(wobble, 0);
-      _paintShakenTarget(canvas, shift);
+      _paintTarget(canvas);
+      final reach = _lossReach(t);
+      if (reach > 0) _paintSweep(canvas, reach);
     }
 
     if (!view.showOutlines) return;
@@ -262,7 +261,7 @@ class BattlePainter extends CustomPainter {
     }
     _outline(
       canvas,
-      view.targetPath.shift(shift),
+      view.targetPath,
       view.defenderColor,
       scale,
       alpha,
@@ -282,9 +281,22 @@ class BattlePainter extends CustomPainter {
     canvas.drawPath(path, line(color.withAlpha(_alpha(a)), _corePx));
   }
 
-  /// The target as the base layer would draw it, but moved by [shift].
-  void _paintShakenTarget(Canvas canvas, Offset shift) {
-    final path = view.targetPath.shift(shift);
+  /// How far a failed attack's sweep has reached (0..1 of the full sweep):
+  /// it advances to the halfway mark during the first two thirds of [t],
+  /// then falls back to nothing in the last third, twice as fast.
+  double _lossReach(double t) {
+    const split = 2 / 3;
+    if (t <= split) {
+      return 0.5 * Curves.easeInOutSine.transform(t / split);
+    }
+    final back = ((t - split) / (1 - split)).clamp(0.0, 1.0);
+    return 0.5 * (1 - Curves.easeInOutSine.transform(back));
+  }
+
+  /// The target as the base layer would draw it (the base layer hides it
+  /// while a failed attack plays).
+  void _paintTarget(Canvas canvas) {
+    final path = view.targetPath;
     canvas.drawPath(
       path,
       Paint()
@@ -303,7 +315,7 @@ class BattlePainter extends CustomPainter {
   /// of the side the attack comes from, like an expanding arc: its center is
   /// where the attackers meet the target's edge, and it ends up large enough
   /// to cover the whole territory, however big or small that is.
-  void _paintSweep(Canvas canvas, double scale, double t) {
+  void _paintSweep(Canvas canvas, double fraction) {
     final bounds = view.targetPath.getBounds();
     var d = view.sweepDirection;
     if (d.distance == 0) d = const Offset(1, 0);
@@ -327,9 +339,7 @@ class BattlePainter extends CustomPainter {
     maxRadius *= 1.03;
     if (maxRadius <= 0) return;
 
-    final progress = t.clamp(0.0, 1.0).toDouble();
-    final eased = Curves.easeInOutSine.transform(progress);
-    final radius = maxRadius * eased;
+    final radius = maxRadius * fraction.clamp(0.0, 1.0);
     if (radius <= 0) return;
 
     // Solid color all the way to the rim: blank the old owner's color, then
@@ -378,12 +388,16 @@ class MapBadge {
   /// The owner's color; the icon and number are drawn in a dark shade of it.
   final Color? color;
 
+  /// 1 = fully visible; lower values fade the whole badge out.
+  final double opacity;
+
   const MapBadge({
     required this.anchor,
     this.icon,
     this.power = 0,
     this.extent = double.infinity,
     this.color,
+    this.opacity = 1,
   });
 
   @override
@@ -393,10 +407,11 @@ class MapBadge {
       other.icon == icon &&
       other.power == power &&
       other.extent == extent &&
-      other.color == color;
+      other.color == color &&
+      other.opacity == opacity;
 
   @override
-  int get hashCode => Object.hash(anchor, icon, power, extent, color);
+  int get hashCode => Object.hash(anchor, icon, power, extent, color, opacity);
 }
 
 /// The badge layer: a building icon in the centre of each province that
@@ -532,6 +547,13 @@ class BadgePainter extends CustomPainter {
 
       canvas.save();
       canvas.translate(badge.anchor.dx, badge.anchor.dy);
+      final faded = badge.opacity < 1;
+      if (faded) {
+        canvas.saveLayer(
+          null,
+          Paint()..color = Color.fromRGBO(255, 255, 255, badge.opacity),
+        );
+      }
 
       if (icon != null && !iconFits) {
         // Too small for the icon: a dot, unless the province itself is a
@@ -567,6 +589,7 @@ class BadgePainter extends CustomPainter {
         painter.paint(canvas, Offset(-painter.width / 2, top));
       }
 
+      if (faded) canvas.restore();
       canvas.restore();
     }
   }

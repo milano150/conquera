@@ -8,6 +8,7 @@ import '../models/battle_event.dart';
 import '../models/attack_result.dart';
 import '../models/player_state.dart';
 import '../models/province_state.dart';
+import '../models/update_entry.dart';
 
 /// A game action that was refused for a normal reason (not enough gold,
 /// not your province, ...). [message] is safe to show to the player.
@@ -82,6 +83,26 @@ class FirestoreService {
         );
   }
 
+  /// A player's personal feed (attacks they did or faced, buildings they
+  /// built or destroyed): the latest [limit] entries, oldest first, so the
+  /// newest is last.
+  Stream<List<UpdateEntry>> watchUpdates({
+    required String gameId,
+    required String uid,
+    int limit = 80,
+  }) {
+    return _playerRef(gameId, uid)
+        .collection('updates')
+        .orderBy('at', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(
+          (snap) => [
+            for (final doc in snap.docs.reversed) UpdateEntry.fromDoc(doc),
+          ],
+        );
+  }
+
   /// Live list of every player in the game, keyed by uid (for owner names
   /// and colors).
   Stream<Map<String, PlayerState>> watchPlayers({required String gameId}) {
@@ -147,6 +168,34 @@ class FirestoreService {
       }
     }
     return (gain: gain, loss: loss);
+  }
+
+  /// Splits [total] power between a newly taken province and the
+  /// [holders] provinces that supplied the troops, without losing any:
+  /// the shares always add up to exactly [total]. Whole numbers go first and
+  /// rounding favors the holders, so 5 power becomes 3 for the attacking
+  /// province and 2 for the new one.
+  ({double annexed, List<double> holders}) _splitPower(
+    double total,
+    int holders,
+  ) {
+    if (holders <= 0) return (annexed: total, holders: const <double>[]);
+    // Not enough to go round: nobody is ever left at 0, so each province
+    // gets 1 (a few power appear out of thin air in this rare case).
+    if (total <= holders + 1) {
+      return (annexed: 1, holders: List<double>.filled(holders, 1));
+    }
+    final annexed = (total / (holders + 1)).floorToDouble();
+    final rest = total - annexed;
+    final base = (rest / holders).floorToDouble();
+    var extra = max(0.0, rest - base * holders);
+    final shares = List<double>.filled(holders, base);
+    for (var i = 0; i < holders && extra >= 1; i++) {
+      shares[i] += 1;
+      extra -= 1;
+    }
+    shares[0] += extra; // any fractional crumbs
+    return (annexed: annexed, holders: shares);
   }
 
   double _troopsOf(DocumentSnapshot<Map<String, dynamic>> snap) =>
@@ -247,7 +296,7 @@ class FirestoreService {
       } else {
         tx.set(provinceRef, {
           'ownerId': uid,
-          'troops': 0,
+          'troops': 1,
           'troopsUpdatedAt': FieldValue.serverTimestamp(),
           'building': {'type': 'none', 'level': 0},
         });
@@ -367,6 +416,12 @@ class FirestoreService {
           spend: building.cost.toDouble(),
         ),
       );
+      tx.set(playerRef.collection('updates').doc(), {
+        'type': 'build',
+        'provinceId': provinceId,
+        'buildingId': building.id,
+        'at': FieldValue.serverTimestamp(),
+      });
       return null;
     });
 
@@ -412,6 +467,12 @@ class FirestoreService {
         ),
         // Starts the "can't build yet" cooldown.
         'lastDestroyAt': Timestamp.fromDate(now),
+      });
+      tx.set(playerRef.collection('updates').doc(), {
+        'type': 'destroy',
+        'provinceId': provinceId,
+        'buildingId': _buildingTypeOf(data),
+        'at': FieldValue.serverTimestamp(),
       });
       return null;
     });
@@ -514,10 +575,16 @@ class FirestoreService {
 
     AttackResult? result;
     String? error;
+    // Territories involved, with troops before and after (for the Updates
+    // feed of both players).
+    final attackerRows = <Map<String, dynamic>>[];
+    final defenderRows = <Map<String, dynamic>>[];
 
     await _db.runTransaction<void>((tx) async {
       result = null;
       error = null;
+      attackerRows.clear();
+      defenderRows.clear();
 
       // Every read first, then the writes.
       final targetSnap = await tx.get(targetRef);
@@ -630,25 +697,42 @@ class FirestoreService {
         // between the fighting provinces and the annexed one. Barracks are
         // left out of the split; their troops were pooled into the attack,
         // so they end up empty.
+        // Every fighting province, barracks included, shares the leftover
+        // with the annexed province: whole numbers, nothing lost, rounding
+        // favors the attackers (5 power -> 3 stay, 2 go to the new province).
         final leftover = attackerPower - defenderPower;
-        final receiverCount = fighters
-                .where((s) =>
-                    !GameRules.supportsAttacks(_buildingTypeOf(s.data())))
-                .length +
-            1; // + the annexed province
-        final share = leftover / receiverCount;
+        final split = _splitPower(leftover, fighters.length);
+        final shareOf = {
+          for (var i = 0; i < fighters.length; i++)
+            fighters[i].id: split.holders[i],
+        };
+        final annexedTroops = split.annexed;
         for (final snap in fighters) {
-          final isBarracks =
-              GameRules.supportsAttacks(_buildingTypeOf(snap.data()));
           tx.update(snap.reference, {
-            'troops': isBarracks ? 0 : share,
+            'troops': shareOf[snap.id] ?? 1,
             'troopsUpdatedAt': stamp,
           });
+          attackerRows.add({
+            'id': snap.id,
+            'before': _troopsOf(snap),
+            'after': shareOf[snap.id] ?? 1,
+          });
         }
-        final annexedTroops = share;
-        // The defending barracks committed everything and lost it.
+        defenderRows.add({
+          'id': targetId,
+          'before': defenderRaw,
+          'after': annexedTroops,
+          'target': true,
+        });
+        // The defending barracks committed everything and lost it, except
+        // for 1 power: a province is never left at 0.
         for (final snap in defenderSupporters) {
-          tx.update(snap.reference, {'troops': 0, 'troopsUpdatedAt': stamp});
+          tx.update(snap.reference, {'troops': 1, 'troopsUpdatedAt': stamp});
+          defenderRows.add({
+            'id': snap.id,
+            'before': _troopsOf(snap),
+            'after': 1,
+          });
         }
 
         // The building does not survive the invasion. Its income is
@@ -709,22 +793,46 @@ class FirestoreService {
         final lost = attackerPower * GameRules.failedAttackLossShare;
         final remaining = max(0.0, defenderPower - lost);
         final keep = defenderPower <= 0 ? 0.0 : remaining / defenderPower;
-        final left = defenderRaw * keep;
-        for (final snap in fighters) {
-          final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
+        final left = max(1.0, defenderRaw * keep);
+        // Every fighting province keeps at least 1 power. The rest of the
+        // survivors (25% of everything that attacked) pull back into the
+        // strongest provinces first, each keeping at most what it had.
+        var spare = max(0.0, attackerPower - lost - fighters.length);
+        final byStrength = [...fighters]
+          ..sort((a, b) => _troopsOf(b).compareTo(_troopsOf(a)));
+        for (final snap in byStrength) {
+          final had = _troopsOf(snap);
+          final extra = min(spare, max(0.0, had - 1));
+          spare -= extra;
           tx.update(snap.reference, {
-            'troops': had * (1 - GameRules.failedAttackLossShare),
+            'troops': 1 + extra,
             'troopsUpdatedAt': stamp,
+          });
+          attackerRows.add({
+            'id': snap.id,
+            'before': had,
+            'after': 1 + extra,
           });
         }
         for (final snap in defenderSupporters) {
           final had = (snap.data()?['troops'] as num?)?.toDouble() ?? 0;
           tx.update(snap.reference, {
-            'troops': had * keep,
+            'troops': max(1.0, had * keep),
             'troopsUpdatedAt': stamp,
+          });
+          defenderRows.add({
+            'id': snap.id,
+            'before': had,
+            'after': max(1.0, had * keep),
           });
         }
         tx.update(targetRef, {'troops': left, 'troopsUpdatedAt': stamp});
+        defenderRows.insert(0, {
+          'id': targetId,
+          'before': defenderRaw,
+          'after': left,
+          'target': true,
+        });
         tx.update(attackerRef, {'lastAttackAt': attackedAt});
 
         result = AttackResult(
@@ -750,6 +858,24 @@ class FirestoreService {
           'defenderSupportIds': r.defenderSupportIds,
           'at': FieldValue.serverTimestamp(),
         });
+
+        // The same report goes into both players' personal Updates feed.
+        final report = {
+          'type': 'attack',
+          'attackerId': uid,
+          'defenderId': defenderId,
+          'targetId': targetId,
+          'won': r.won,
+          'attackerPower': attackerPower,
+          'defenderPower': defenderPower,
+          'defenseMultiplier': defenseMultiplier,
+          'targetBuilding': _buildingTypeOf(targetData),
+          'attackers': attackerRows,
+          'defenders': defenderRows,
+          'at': FieldValue.serverTimestamp(),
+        };
+        tx.set(attackerRef.collection('updates').doc(), report);
+        tx.set(_playerRef(gameId, defenderId).collection('updates').doc(), report);
       }
     });
 
@@ -857,10 +983,11 @@ class FirestoreService {
         for (final snap in sharing) {
           pool += _troopsOf(snap);
         }
-        share = pool / (sharing.length + 1);
-        for (final snap in sharing) {
-          tx.update(snap.reference, {
-            'troops': share,
+        final split = _splitPower(pool, sharing.length);
+        share = split.annexed;
+        for (var i = 0; i < sharing.length; i++) {
+          tx.update(sharing[i].reference, {
+            'troops': split.holders[i],
             'troopsUpdatedAt': stamp,
           });
         }

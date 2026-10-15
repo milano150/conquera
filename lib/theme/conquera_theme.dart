@@ -27,6 +27,9 @@ class ConqueraColors {
 
   // Errors and "can't afford" hints.
   static const Color danger = Color(0xFF9B2C2C);
+
+  // Good news (a war you started, an attack you won).
+  static const Color success = Color(0xFF2E7D4F);
 }
 
 /// Spacing scale (logical pixels).

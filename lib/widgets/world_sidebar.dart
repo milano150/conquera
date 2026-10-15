@@ -29,6 +29,9 @@ class WorldSidebar extends StatefulWidget {
   /// The current player, highlighted in the leaderboard.
   final String? myUid;
 
+  /// Opens the Updates (war log) screen.
+  final VoidCallback onOpenUpdates;
+
   const WorldSidebar({
     super.key,
     required this.open,
@@ -37,6 +40,7 @@ class WorldSidebar extends StatefulWidget {
     required this.players,
     required this.provinces,
     this.myUid,
+    required this.onOpenUpdates,
   });
 
   @override
@@ -118,6 +122,7 @@ class _WorldSidebarState extends State<WorldSidebar>
                   players: widget.players,
                   provinces: widget.provinces,
                   myUid: widget.myUid,
+                  onOpenUpdates: widget.onOpenUpdates,
                 ),
               ),
             ),
@@ -133,12 +138,14 @@ class _Panel extends StatefulWidget {
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
   final String? myUid;
+  final VoidCallback onOpenUpdates;
 
   const _Panel({
     required this.worldId,
     required this.players,
     required this.provinces,
     required this.myUid,
+    required this.onOpenUpdates,
   });
 
   @override
@@ -201,6 +208,7 @@ class _PanelState extends State<_Panel> {
           label: 'Leaderboard',
           onTap: () => setState(() => _showLeaderboard = true),
         ),
+        _Item(label: 'Updates', onTap: widget.onOpenUpdates),
         // Nothing behind these yet.
         _Item(label: 'How to play', onTap: () {}),
         _Item(label: 'Settings', onTap: () {}),

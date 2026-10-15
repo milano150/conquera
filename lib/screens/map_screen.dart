@@ -13,6 +13,7 @@ import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
 import '../painters/map_painter.dart';
+import '../screens/updates_screen.dart';
 import '../services/firestore_service.dart';
 import '../state/map_controller.dart';
 import '../theme/conquera_theme.dart';
@@ -158,6 +159,25 @@ class _MapScreenState extends State<MapScreen>
   /// troops left), then hidden again.
   Map<String, int> _revealedPower = const {};
 
+  /// Drives how long the revealed power stays up and when it fades:
+  /// [_revealHold] fully visible, then [_revealFade] fading out.
+  static const Duration _revealHold = Duration(milliseconds: 2500);
+  static const Duration _revealFade = Duration(milliseconds: 1000);
+  late final AnimationController _revealCtl = AnimationController(
+    vsync: this,
+    duration: _revealHold + _revealFade,
+  )..addListener(() {
+      if (mounted && _revealedPower.isNotEmpty) setState(() {});
+    });
+
+  double get _revealOpacity {
+    final holdShare =
+        _revealHold.inMilliseconds / (_revealHold + _revealFade).inMilliseconds;
+    final t = _revealCtl.value;
+    if (t <= holdShare) return 1;
+    return (1 - (t - holdShare) / (1 - holdShare)).clamp(0.0, 1.0);
+  }
+
   Map<String, double> _snapshotTroops() => {
         for (final e in _provinceStates.value.entries) e.key: e.value.troops,
       };
@@ -232,6 +252,7 @@ class _MapScreenState extends State<MapScreen>
     _fx.dispose();
     _popupAnim.dispose();
     _cam.dispose();
+    _revealCtl.dispose();
     super.dispose();
   }
 
@@ -417,6 +438,7 @@ class _MapScreenState extends State<MapScreen>
             power: revealed,
             extent: sqrt(province.bounds.width * province.bounds.height),
             color: _players.value[state.ownerId]?.color,
+            opacity: _revealOpacity,
           ),
         );
         return;
@@ -893,7 +915,7 @@ class _MapScreenState extends State<MapScreen>
           outcome: BattleOutcome.lost,
         );
       });
-      _fx.duration = const Duration(milliseconds: 650);
+      _fx.duration = const Duration(milliseconds: 825);
       await _fx.forward(from: 0);
       if (!mounted) return;
       setState(() {
@@ -910,13 +932,13 @@ class _MapScreenState extends State<MapScreen>
     _endBattle();
   }
 
-  /// Shows the defender's remaining power on the map for a second.
-  void _revealLeftover(String id, double left) {
+  /// Shows the defender's remaining power on the map for a few seconds,
+  /// then fades it away.
+  Future<void> _revealLeftover(String id, double left) async {
     setState(() => _revealedPower = {id: left.floor()});
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() => _revealedPower = const {});
-    });
+    await _revealCtl.forward(from: 0);
+    if (!mounted) return;
+    setState(() => _revealedPower = const {});
   }
 
   void _showPopup(
@@ -1042,7 +1064,7 @@ class _MapScreenState extends State<MapScreen>
           outcome: BattleOutcome.lost,
         );
       });
-      _fx.duration = const Duration(milliseconds: 650);
+      _fx.duration = const Duration(milliseconds: 825);
       await _fx.forward(from: 0);
       if (!mounted) return;
       setState(() => _hiddenIds = const {});
@@ -1194,6 +1216,43 @@ class _MapScreenState extends State<MapScreen>
           ),
         ),
       ],
+    );
+  }
+
+  /// Opens the war log (attacks you did or faced, buildings built and
+  /// destroyed).
+  void _openUpdates() {
+    setState(() => _sidebarOpen = false);
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 320),
+        reverseTransitionDuration: const Duration(milliseconds: 260),
+        // Swipes in from the left edge, to the right, like the menu it
+        // came from.
+        transitionsBuilder: (context, animation, secondary, child) =>
+            SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(-1, 0),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+              reverseCurve: Curves.easeInCubic,
+            ),
+          ),
+          child: child,
+        ),
+        pageBuilder: (_, __, ___) => UpdatesScreen(
+          gameId: widget.gameId,
+          uid: _uid,
+          firestore: _firestore,
+          provinceNames: {
+            for (final p in _controller.provinces) p.id: p.name,
+          },
+          players: _players,
+        ),
+      ),
     );
   }
 
@@ -1418,6 +1477,7 @@ class _MapScreenState extends State<MapScreen>
             players: _players,
             provinces: _provinceStates,
             myUid: _uid,
+            onOpenUpdates: _openUpdates,
           ),
         ],
       ),
