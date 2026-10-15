@@ -14,6 +14,8 @@ import '../models/province.dart';
 import '../models/province_state.dart';
 import '../painters/map_painter.dart';
 import '../screens/how_to_play_screen.dart';
+import '../services/spawn_candidates.dart';
+import '../widgets/death_overlay.dart';
 import '../screens/updates_screen.dart';
 import '../services/firestore_service.dart';
 import '../state/map_controller.dart';
@@ -124,13 +126,22 @@ class _MapScreenState extends State<MapScreen>
   final Set<String> _seenEventIds = {};
   bool _drainingEvents = false;
 
-  /// If true, the camera flies to other players' battles so nobody misses
-  /// the invasion and the "annexed" pop-up.
-  static const bool _cameraFollowsBattles = true;
+  /// If true, the camera flies to other players' battles (which also takes
+  /// the view away from the player while it moves). Off: other players'
+  /// invasions play out where they are, and the player keeps their own view.
+  /// Your own attacks still pan to their target.
+  static const bool _cameraFollowsBattles = false;
   final ValueNotifier<Map<String, ProvinceState>> _provinceStates =
       ValueNotifier(const {});
   final ValueNotifier<Map<String, PlayerState>> _players =
       ValueNotifier(const {});
+
+  /// True once both streams above have delivered their first data. The death
+  /// screen waits for this, so a map that hasn't loaded yet never counts as
+  /// "you own nothing".
+  final ValueNotifier<bool> _dataReady = ValueNotifier(false);
+  bool _provincesLoaded = false;
+  bool _playersLoaded = false;
 
   /// How opaque an owner's color is over the land fill (0-255).
   static const int _ownerFillAlpha = 170;
@@ -225,13 +236,21 @@ class _MapScreenState extends State<MapScreen>
     _provincesSub = _firestore
         .watchProvinces(gameId: widget.gameId)
         .listen(
-      (states) => _provinceStates.value = states,
+      (states) {
+        _provinceStates.value = states;
+        _provincesLoaded = true;
+        _dataReady.value = _playersLoaded;
+      },
       onError: (Object e) => debugPrint('Provinces stream error: $e'),
     );
     _playersSub = _firestore
         .watchPlayers(gameId: widget.gameId)
         .listen(
-      (players) => _players.value = players,
+      (players) {
+        _players.value = players;
+        _playersLoaded = true;
+        _dataReady.value = _provincesLoaded;
+      },
       onError: (Object e) => debugPrint('Players stream error: $e'),
     );
     _eventsSub = _firestore.watchBattleEvents(gameId: widget.gameId).listen(
@@ -247,6 +266,7 @@ class _MapScreenState extends State<MapScreen>
     _eventsSub?.cancel();
     _provinceStates.dispose();
     _players.dispose();
+    _dataReady.dispose();
     _controller.dispose();
     _transform.dispose();
     _pulse.dispose();
@@ -375,6 +395,33 @@ class _MapScreenState extends State<MapScreen>
     } finally {
       _cam.duration = normal;
     }
+  }
+
+  /// After a respawn: fly to the new starting country.
+  Future<void> _flyToTerritory(String id) async {
+    final target = _controller.provinceById(id);
+    if (target == null) return;
+    final side = max(target.bounds.longestSide, 1.0);
+    final shortSide = min(_viewport.width, _viewport.height);
+    final wanted = (shortSide * 0.4) / side;
+
+    final normal = _cam.duration;
+    _cam.duration = const Duration(milliseconds: 2200);
+    try {
+      await _panTo(target.anchor, minScale: wanted);
+    } finally {
+      _cam.duration = normal;
+    }
+  }
+
+  /// Respawn button of the death screen.
+  Future<void> _respawn() async {
+    final id = await _firestore.respawn(
+      gameId: widget.gameId,
+      uid: _uid,
+      spawnCandidates: spawnCandidatesFor(_controller.provinces),
+    );
+    if (mounted) unawaited(_flyToTerritory(id));
   }
 
   /// Where the player's land is: the country they just spawned in, or else
@@ -995,8 +1042,8 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
-  /// Replays [e] on this map: outlines, the sweep, and (for a conquest)
-  /// the "player annexed country" pop-up.
+  /// Replays [e] on this map: the sweep and (for a conquest) the "player
+  /// annexed country" pop-up. Other players' fights get no pulsing borders.
   Future<void> _spectateBattle(BattleEvent e) async {
     final target = _controller.provinceById(e.targetId);
     if (target == null || !mounted) return;
@@ -1023,6 +1070,7 @@ class _MapScreenState extends State<MapScreen>
         attackerColor: attackerColor,
         defenderColor: defenderColor,
         outcome: BattleOutcome.pending,
+        showOutlines: false,
       );
     });
 
@@ -1039,6 +1087,7 @@ class _MapScreenState extends State<MapScreen>
           attackerColor: attackerColor,
           defenderColor: defenderColor,
           outcome: BattleOutcome.won,
+          showOutlines: false,
         );
       });
       _fx.duration = const Duration(milliseconds: 1100);
@@ -1063,6 +1112,7 @@ class _MapScreenState extends State<MapScreen>
           attackerColor: attackerColor,
           defenderColor: defenderColor,
           outcome: BattleOutcome.lost,
+          showOutlines: false,
         );
       });
       _fx.duration = const Duration(milliseconds: 825);
@@ -1491,6 +1541,18 @@ class _MapScreenState extends State<MapScreen>
             myUid: _uid,
             onOpenUpdates: _openUpdates,
             onOpenHowToPlay: _openHowToPlay,
+          ),
+          Positioned.fill(
+            child: DeathOverlay(
+              players: _players,
+              provinces: _provinceStates,
+              ready: _dataReady,
+              myUid: _uid,
+              provinceName: (id) => _controller.provinceById(id)?.name ?? id,
+              loadLastInvasion: () =>
+                  _firestore.lastInvasion(gameId: widget.gameId, uid: _uid),
+              onRespawn: _respawn,
+            ),
           ),
         ],
       ),

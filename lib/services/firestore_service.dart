@@ -1129,6 +1129,85 @@ class FirestoreService {
   }) =>
       _reconcileTerritoryIncome(gameId: gameId, uid: uid);
 
+  /// The attack that took [uid]'s most recent territory: the newest entry in
+  /// their feed that was a won attack against them. Null if there is none.
+  Future<UpdateEntry?> lastInvasion({
+    required String gameId,
+    required String uid,
+  }) async {
+    final snap = await _playerRef(gameId, uid)
+        .collection('updates')
+        .orderBy('at', descending: true)
+        .limit(30)
+        .get();
+    for (final doc in snap.docs) {
+      final entry = UpdateEntry.fromDoc(doc);
+      if (entry.type == UpdateType.attack &&
+          entry.won &&
+          entry.defenderId == uid) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  /// Puts a player who lost every territory back into the world: a random
+  /// free country from [spawnCandidates], with [GameRules.startingTroops]
+  /// power, and their gold reset to [GameRules.startingGold]. Returns the id
+  /// of that country.
+  ///
+  /// Throws [GameActionException] if the player still owns a territory, never
+  /// joined this world, or no candidate is free.
+  Future<String> respawn({
+    required String gameId,
+    required String uid,
+    required List<String> spawnCandidates,
+  }) async {
+    final playerRef = _playerRef(gameId, uid);
+
+    final stillOwns = await _provincesRef(gameId)
+        .where('ownerId', isEqualTo: uid)
+        .limit(1)
+        .get();
+    if (stillOwns.docs.isNotEmpty) {
+      throw const GameActionException('You still own a territory.');
+    }
+
+    final candidates = [...spawnCandidates]..shuffle();
+    for (final provinceId in candidates) {
+      final provinceRef = _provincesRef(gameId).doc(provinceId);
+
+      final spawned = await _db.runTransaction<bool>((tx) async {
+        final playerSnap = await tx.get(playerRef);
+        if (!playerSnap.exists) {
+          throw const GameActionException('You have not joined this world.');
+        }
+        final provinceSnap = await tx.get(provinceRef);
+        if (provinceSnap.exists && provinceSnap.data()?['ownerId'] != null) {
+          return false; // taken, try the next one
+        }
+
+        tx.set(provinceRef, {
+          'ownerId': uid,
+          'troops': GameRules.startingTroops,
+          'troopsUpdatedAt': FieldValue.serverTimestamp(),
+          'building': {'type': 'none', 'level': 0},
+        });
+        tx.update(playerRef, {
+          'gold': GameRules.startingGold.toDouble(),
+          'goldUpdatedAt': FieldValue.serverTimestamp(),
+          'ownedCount': 1,
+          'buildingIncome': 0.0,
+          'goldRate': GameRules.incomeRate(territories: 1, buildingIncome: 0),
+        });
+        return true;
+      });
+
+      if (spawned) return provinceId;
+    }
+    throw const GameActionException('There is no free country to respawn in.');
+  }
+
   /// Adds a new player to an existing world: creates their document with
   /// [GameRules.startingGold] and gives them a random free country from
   /// [spawnCandidates] (province ids) as their starting territory. Returns

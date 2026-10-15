@@ -436,7 +436,9 @@ class BadgePainter extends CustomPainter {
   final List<MapBadge> badges;
   final TransformationController transform;
 
-  /// Zoom level (the viewer's scale) from which power numbers are shown.
+  /// Zoom level (the viewer's scale) at which power numbers are fully
+  /// visible. They start to fade in a little before that, see
+  /// [_powerFadeStart].
   final double powerMinScale;
 
   /// Icon height and power-number font size, in map units.
@@ -455,6 +457,13 @@ class BadgePainter extends CustomPainter {
   /// Largest icon / number, as a share of the province's extent.
   static const double _iconShare = 0.45;
   static const double _powerShare = 0.3;
+
+  /// Power numbers begin to fade in at this share of [powerMinScale] and are
+  /// fully visible at [powerMinScale].
+  static const double _powerFadeStart = 0.8;
+
+  /// Fade steps. The number's color is cached per step, so keep it small.
+  static const int _powerFadeSteps = 12;
 
   /// Smallest icon / number height, in screen pixels. Tiny countries are
   /// drawn at this size, larger than the country itself.
@@ -524,10 +533,21 @@ class BadgePainter extends CustomPainter {
     }
   }
 
+  /// 0 (hidden) to 1 (fully visible), eased, in [_powerFadeSteps] steps.
+  double _powerOpacity(double scale) {
+    final from = powerMinScale * _powerFadeStart;
+    if (scale <= from) return 0;
+    if (scale >= powerMinScale) return 1;
+    final t = (scale - from) / (powerMinScale - from);
+    final eased = t * t * (3 - 2 * t);
+    return (eased * _powerFadeSteps).round() / _powerFadeSteps;
+  }
+
   void _paintOnce(Canvas canvas, Size size) {
     final scale = transform.value.getMaxScaleOnAxis();
     if (scale <= 0) return;
-    final showPower = scale >= powerMinScale;
+    final powerOpacity = _powerOpacity(scale);
+    final showPower = powerOpacity > 0;
 
     for (final badge in badges) {
       final color = _tint(badge.color);
@@ -561,7 +581,8 @@ class BadgePainter extends CustomPainter {
       }
 
       if (showNumber) {
-        final painter = _powerPainter(badge.power, powerMapSize, color);
+        final numberColor = color.withAlpha((_inkAlpha * powerOpacity).round());
+        final painter = _powerPainter(badge.power, powerMapSize, numberColor);
         // Under the icon, or centred when there's no icon to sit under.
         final top = iconFits ? iconMapSize / 2 : -painter.height / 2;
         painter.paint(canvas, Offset(-painter.width / 2, top));

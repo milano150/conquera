@@ -319,36 +319,52 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
     return [
       const SizedBox(height: ConqueraSpace.md),
       // Attacker on the left, defender on the right, each in their color.
-      IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _side(
-                playerId: e.attackerId,
-                role: 'Attacking',
-                power: 'Attack power ${e.attackerPower.floor()}',
-                rows: e.attackers,
-                rightSide: false,
+      // The divider is drawn behind the row and stretched to the row's
+      // height. (IntrinsicHeight did the same, but its height guess could be
+      // a pixel short of the real layout and flash an overflow error while
+      // the card was expanding.)
+      Stack(
+        children: [
+          const Positioned.fill(
+            child: Align(
+              child: SizedBox(
+                width: 1,
+                height: double.infinity,
+                child: ColoredBox(color: ConqueraColors.divider),
               ),
             ),
-            const VerticalDivider(
-              width: ConqueraSpace.md * 2,
-              thickness: 1,
-              color: ConqueraColors.divider,
-            ),
-            Expanded(
-              child: _side(
-                playerId: e.defenderId,
-                role: 'Defending',
-                power: 'Defense power ${e.defenderPower.floor()}',
-                bonus: bonus,
-                rows: e.defenders,
-                rightSide: true,
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: ConqueraSpace.md),
+                  child: _side(
+                    playerId: e.attackerId,
+                    role: 'Attacking',
+                    power: 'Attack power ${e.attackerPower.floor()}',
+                    rows: e.attackers,
+                    rightSide: false,
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: ConqueraSpace.md),
+                  child: _side(
+                    playerId: e.defenderId,
+                    role: 'Defending',
+                    power: 'Defense power ${e.defenderPower.floor()}',
+                    bonus: bonus,
+                    rows: e.defenders,
+                    rightSide: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       const SizedBox(height: ConqueraSpace.md),
       Text(
