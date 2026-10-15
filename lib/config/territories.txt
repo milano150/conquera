@@ -1,0 +1,2291 @@
+CONQUERA - TERRITORY REPORT (world.svg)
+========================================================================
+Territories in the SVG: 220   (SVG paths: 470, map 2000x857)
+Territory = one group of SVG paths that share an id (or class). Land borders were
+recomputed from the geometry the same way BorderFinder does (outline samples within
+2.0 map units, after the same 2-pass Chaikin smoothing).
+
+CONNECTIVITY
+------------------------------------------------------------------------
+Before this change: 26 separate groups (land borders + the old sea links).
+  main group: 190 territories; 25 territories/clusters cut off:
+    - AI (Anguilla), BL (Saint-Barthélemy), MF (Saint-Martin), SX (Sint Maarten)
+    - BQSA (Saba (Netherlands)), BQSE (St. Eustatius (Netherlands)), KN (Saint Kitts and Nevis)
+    - AW (Aruba)
+    - AG (Antigua and Barbuda)
+    - BM (Bermuda)
+    - BB (Barbados)
+    - CW (Curaçao)
+    - DM (Dominica)
+    - FM (Federated States of Micronesia)
+    - GD (Grenada)
+    - GU (Guam)
+    - LC (Saint Lucia)
+    - MH (Marshall Islands)
+    - MP (Northern Mariana Islands)
+    - MS (Montserrat)
+    - NR (Nauru)
+    - PW (Palau)
+    - PF (French Polynesia)
+    - TV (Tuvalu)
+    - VC (Saint Vincent and the Grenadines)
+    - BQBO (Netherlands)
+    - MQ (Martinique)
+    - YT (Mayotte)
+    - RE (Reunion)
+    - GP (Guadeloupe)
+After: 1 group - all 220 territories can reach each other by land borders and sea links.
+Sea links: 75 existing (2 of them point at SG, which is not on this map, so they are skipped) + 46 new.
+
+NEW SEA LINKS
+------------------------------------------------------------------------
+  VG (British Virgin Islands)  <->  AI (Anguilla)
+  VI (United States Virgin Islands)  <->  SX (Sint Maarten)
+  BL (Saint-Barthélemy)  <->  KN (Saint Kitts and Nevis)
+  SX (Sint Maarten)  <->  BQSA (Saba (Netherlands))
+  KN (Saint Kitts and Nevis)  <->  AG (Antigua and Barbuda)
+  KN (Saint Kitts and Nevis)  <->  MS (Montserrat)
+  AG (Antigua and Barbuda)  <->  MS (Montserrat)
+  AG (Antigua and Barbuda)  <->  GP (Guadeloupe)
+  MS (Montserrat)  <->  GP (Guadeloupe)
+  GP (Guadeloupe)  <->  DM (Dominica)
+  DM (Dominica)  <->  MQ (Martinique)
+  MQ (Martinique)  <->  LC (Saint Lucia)
+  LC (Saint Lucia)  <->  VC (Saint Vincent and the Grenadines)
+  LC (Saint Lucia)  <->  BB (Barbados)
+  VC (Saint Vincent and the Grenadines)  <->  BB (Barbados)
+  VC (Saint Vincent and the Grenadines)  <->  GD (Grenada)
+  GD (Grenada)  <->  BB (Barbados)
+  GD (Grenada)  <->  TT (Trinidad and Tobago)
+  BB (Barbados)  <->  TT (Trinidad and Tobago)
+  AW (Aruba)  <->  VE (Venezuela)
+  AW (Aruba)  <->  CW (Curaçao)
+  CW (Curaçao)  <->  VE (Venezuela)
+  CW (Curaçao)  <->  BQBO (Netherlands)
+  BQBO (Netherlands)  <->  VE (Venezuela)
+  BM (Bermuda)  <->  US (United States)
+  BM (Bermuda)  <->  BS (Bahamas)
+  PW (Palau)  <->  PH (Philippines)
+  PW (Palau)  <->  ID (Indonesia)
+  PW (Palau)  <->  FM (Federated States of Micronesia)
+  FM (Federated States of Micronesia)  <->  GU (Guam)
+  GU (Guam)  <->  MP (Northern Mariana Islands)
+  MP (Northern Mariana Islands)  <->  FM (Federated States of Micronesia)
+  FM (Federated States of Micronesia)  <->  PG (Papua New Guinea)
+  FM (Federated States of Micronesia)  <->  MH (Marshall Islands)
+  FM (Federated States of Micronesia)  <->  NR (Nauru)
+  MH (Marshall Islands)  <->  NR (Nauru)
+  NR (Nauru)  <->  SB (Solomon Islands)
+  TV (Tuvalu)  <->  FJ (Fiji)
+  TV (Tuvalu)  <->  NR (Nauru)
+  TV (Tuvalu)  <->  SB (Solomon Islands)
+  PF (French Polynesia)  <->  AS (American Samoa)
+  PF (French Polynesia)  <->  WS (Samoa)
+  YT (Mayotte)  <->  KM (Comoros)
+  YT (Mayotte)  <->  MG (Madagascar)
+  RE (Reunion)  <->  MU (Mauritius)
+  RE (Reunion)  <->  MG (Madagascar)
+
+FIELDS: area in km2 | type | landmass # (groups joined by land borders alone) |
+        svg parts | land borders | sea links ("*" = added now) | buildings allowed
+========================================================================
+
+AF  -  Afghanistan
+  area:        652,230 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1341, 285); bounds (1312,255)-(1384,313)
+  landmass:    #1 (129 territories)
+  land borders (6): CN, IR, PK, TJ, TM, UZ
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+AL  -  Albania
+  area:        28,748 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1090, 238); bounds (1087,228)-(1095,246)
+  landmass:    #1 (129 territories)
+  land borders (4): GR, ME, MK, XK
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+DZ  -  Algeria
+  area:        2,381,741 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1001, 321); bounds (939,264)-(1052,379)
+  landmass:    #1 (129 territories)
+  land borders (7): EH, LY, MA, ML, MR, NE, TN
+  sea links    (1): ES
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+AS  -  American Samoa
+  area:        199 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (27, 594); bounds (27,593)-(34,594)
+  landmass:    #19 (1 territory)
+  land borders (0): -
+  sea links    (2): PF*, WS
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+AO  -  Angola
+  area:        1,246,700 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1085, 581); bounds (1052,531)-(1122,617)
+  landmass:    #1 (129 territories)
+  land borders (4): CD, CG, NA, ZM
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+AI  -  Anguilla
+  area:        91 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (634, 385); bounds (634,384)-(635,385)
+  landmass:    #3 (4 territories)
+  land borders (2): MF, SX
+  sea links    (1): VG*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+AG  -  Antigua and Barbuda
+  area:        442 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (641, 392); bounds (640,388)-(641,393)
+  landmass:    #20 (1 territory)
+  land borders (0): -
+  sea links    (3): GP*, KN*, MS*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+AR  -  Argentina
+  area:        2,780,400 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (640, 726); bounds (605,642)-(692,854)
+  landmass:    #2 (25 territories)
+  land borders (5): BO, BR, CL, PY, UY
+  sea links    (1): FK
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+AM  -  Armenia
+  area:        29,743 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1221, 244); bounds (1213,237)-(1231,253)
+  landmass:    #1 (129 territories)
+  land borders (4): AZ, GE, IR, TR
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+AW  -  Aruba
+  area:        180 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (592, 421); bounds (592,421)-(593,422)
+  landmass:    #18 (1 territory)
+  land borders (0): -
+  sea links    (2): CW*, VE*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+AU  -  Australia
+  area:        7,741,220 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1725, 665); bounds (1604,571)-(1829,781)
+  landmass:    #8 (1 territory)
+  land borders (0): -
+  sea links    (4): ID, NC, NZ, PG
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+AT  -  Austria
+  area:        83,871 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1057, 197); bounds (1035,188)-(1071,204)
+  landmass:    #1 (129 territories)
+  land borders (7): CH, CZ, DE, HU, IT, SI, SK
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+AZ  -  Azerbaijan
+  area:        86,600 km2
+  type:        landlocked
+  map:         2 svg part(s); anchor (1235, 243); bounds (1221,234)-(1248,256)
+  landmass:    #1 (129 territories)
+  land borders (5): AM, GE, IR, RU, TR
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BS  -  Bahamas
+  area:        13,880 km2
+  type:        coastal, island archipelago
+  map:         18 svg part(s); anchor (562, 333); bounds (553,329)-(583,367)
+  landmass:    #21 (1 territory)
+  land borders (0): -
+  sea links    (4): BM*, CU, TC, US
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BH  -  Bahrain
+  area:        765 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1265, 335); bounds (1264,333)-(1265,336)
+  landmass:    #1 (129 territories)
+  land borders (1): SA
+  sea links    (2): QA, SA
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BD  -  Bangladesh
+  area:        148,460 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1486, 349); bounds (1473,333)-(1501,368)
+  landmass:    #1 (129 territories)
+  land borders (2): IN, MM
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BB  -  Barbados
+  area:        430 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (651, 417); bounds (651,416)-(652,418)
+  landmass:    #23 (1 territory)
+  land borders (0): -
+  sea links    (4): GD*, LC*, TT*, VC*
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BY  -  Belarus
+  area:        207,600 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1120, 161); bounds (1099,145)-(1142,174)
+  landmass:    #1 (129 territories)
+  land borders (5): LT, LV, PL, RU, UA
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BE  -  Belgium
+  area:        30,528 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1009, 178); bounds (999,174)-(1016,184)
+  landmass:    #1 (129 territories)
+  land borders (4): DE, FR, LU, NL
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BZ  -  Belize
+  area:        22,966 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (490, 391); bounds (487,384)-(494,399)
+  landmass:    #2 (25 territories)
+  land borders (2): GT, MX
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BJ  -  Benin
+  area:        114,763 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1000, 440); bounds (991,424)-(1008,462)
+  landmass:    #1 (129 territories)
+  land borders (4): BF, NE, NG, TG
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BM  -  Bermuda
+  area:        54 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (637, 294); bounds (637,294)-(637,294)
+  landmass:    #22 (1 territory)
+  land borders (0): -
+  sea links    (2): BS*, US*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BT  -  Bhutan
+  area:        38,394 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1483, 326); bounds (1474,321)-(1492,330)
+  landmass:    #1 (129 territories)
+  land borders (2): CN, IN
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BO  -  Bolivia
+  area:        1,098,581 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (625, 609); bounds (595,565)-(665,648)
+  landmass:    #2 (25 territories)
+  land borders (5): AR, BR, CL, PE, PY
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BA  -  Bosnia and Herzegovina
+  area:        51,209 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1077, 219); bounds (1067,212)-(1086,227)
+  landmass:    #1 (129 territories)
+  land borders (3): HR, ME, RS
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BW  -  Botswana
+  area:        581,730 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1118, 644); bounds (1096,616)-(1149,674)
+  landmass:    #1 (129 territories)
+  land borders (4): NA, ZA, ZM, ZW
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BR  -  Brazil
+  area:        8,515,767 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (688, 571); bounds (569,468)-(790,718)
+  landmass:    #2 (25 territories)
+  land borders (10): AR, BO, CO, GF, GY, PE, PY, SR, UY, VE
+  sea links    (0): -
+  neighbors total: 10
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+VG  -  British Virgin Islands
+  area:        151 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (626, 383); bounds (625,383)-(626,384)
+  landmass:    #7 (2 territories)
+  land borders (1): VI
+  sea links    (1): AI*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BN  -  Brunei Darussalam
+  area:        5,765 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1637, 472); bounds (1634,468)-(1640,475)
+  landmass:    #1 (129 territories)
+  land borders (1): MY
+  sea links    (0): -
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BG  -  Bulgaria
+  area:        110,879 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1116, 228); bounds (1101,219)-(1132,237)
+  landmass:    #1 (129 territories)
+  land borders (5): GR, MK, RO, RS, TR
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BF  -  Burkina Faso
+  area:        274,200 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (976, 423); bounds (956,405)-(999,440)
+  landmass:    #1 (129 territories)
+  land borders (6): BJ, CI, GH, ML, NE, TG
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BI  -  Burundi
+  area:        27,830 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1156, 523); bounds (1151,517)-(1160,530)
+  landmass:    #1 (129 territories)
+  land borders (3): CD, RW, TZ
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+KH  -  Cambodia
+  area:        181,035 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1577, 420); bounds (1562,409)-(1592,434)
+  landmass:    #1 (129 territories)
+  land borders (3): LA, TH, VN
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CM  -  Cameroon
+  area:        475,440 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1058, 465); bounds (1035,420)-(1077,490)
+  landmass:    #1 (129 territories)
+  land borders (7): CF, CG, GA, GQ, NE, NG, TD
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CA  -  Canada
+  area:        9,984,670 km2
+  type:        coastal
+  map:         30 svg part(s); anchor (523, 139); bounds (349,3)-(777,232)
+  landmass:    #2 (25 territories)
+  land borders (2): GL, US
+  sea links    (1): GL
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CV  -  Cape Verde
+  area:        4,033 km2
+  type:        coastal, island archipelago
+  map:         9 svg part(s); anchor (854, 405); bounds (845,391)-(859,407)
+  landmass:    #25 (1 territory)
+  land borders (0): -
+  sea links    (2): MR, SN
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+KY  -  Cayman Islands
+  area:        264 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (533, 378); bounds (533,375)-(542,378)
+  landmass:    #27 (1 territory)
+  land borders (0): -
+  sea links    (2): CU, JM
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+CF  -  Central African Republic
+  area:        622,984 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1102, 460); bounds (1068,431)-(1141,486)
+  landmass:    #1 (129 territories)
+  land borders (6): CD, CG, CM, SD, SS, TD
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+TD  -  Chad
+  area:        1,284,000 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1091, 404); bounds (1063,352)-(1120,454)
+  landmass:    #1 (129 territories)
+  land borders (5): CF, CM, LY, NE, SD
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+CL  -  Chile
+  area:        756,102 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (610, 737); bounds (594,616)-(668,856)
+  landmass:    #2 (25 territories)
+  land borders (3): AR, BO, PE
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CN  -  China
+  area:        9,596,961 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1535, 269); bounds (1373,161)-(1662,384)
+  landmass:    #1 (129 territories)
+  land borders (14): AF, BT, IN, KG, KP, KZ, LA, MM, MN, NP, PK, RU, TJ, VN
+  sea links    (1): TW
+  neighbors total: 15
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CO  -  Colombia
+  area:        1,141,748 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (573, 477); bounds (539,423)-(607,528)
+  landmass:    #2 (25 territories)
+  land borders (5): BR, EC, PA, PE, VE
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+KM  -  Comoros
+  area:        1,861 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (1231, 577); bounds (1230,575)-(1237,581)
+  landmass:    #24 (1 territory)
+  land borders (0): -
+  sea links    (4): MG, MZ, TZ, YT*
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+CR  -  Costa Rica
+  area:        51,100 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (511, 438); bounds (502,430)-(519,448)
+  landmass:    #2 (25 territories)
+  land borders (2): NI, PA
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+HR  -  Croatia
+  area:        56,594 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1070, 213); bounds (1056,204)-(1084,229)
+  landmass:    #1 (129 territories)
+  land borders (6): BA, HU, IT, ME, RS, SI
+  sea links    (1): IT
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CU  -  Cuba
+  area:        109,884 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (548, 363); bounds (516,353)-(573,374)
+  landmass:    #9 (1 territory)
+  land borders (0): -
+  sea links    (6): BS, HT, JM, KY, MX, US
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+CW  -  Curaçao
+  area:        444 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (598, 424); bounds (597,422)-(599,424)
+  landmass:    #26 (1 territory)
+  land borders (0): -
+  sea links    (3): AW*, BQBO*, VE*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+CY  -  Cyprus
+  area:        9,251 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (1163, 278); bounds (1159,276)-(1168,279)
+  landmass:    #28 (1 territory)
+  land borders (0): -
+  sea links    (4): IL, LB, SY, TR
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+CZ  -  Czech Republic
+  area:        78,867 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1062, 183); bounds (1047,175)-(1079,190)
+  landmass:    #1 (129 territories)
+  land borders (4): AT, DE, PL, SK
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+CI  -  Côte d'Ivoire
+  area:        322,463 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (955, 453); bounds (938,435)-(972,473)
+  landmass:    #1 (129 territories)
+  land borders (5): BF, GH, GN, LR, ML
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+KP  -  Dem. Rep. Korea
+  area:        120,538 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1650, 244); bounds (1637,227)-(1661,259)
+  landmass:    #1 (129 territories)
+  land borders (3): CN, KR, RU
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CD  -  Democratic Republic of the Congo
+  area:        2,344,858 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1120, 520); bounds (1056,468)-(1162,587)
+  landmass:    #1 (129 territories)
+  land borders (8): AO, BI, CF, CG, RW, SS, UG, ZM
+  sea links    (0): -
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+DK  -  Denmark
+  area:        43,094 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1030, 144); bounds (1024,136)-(1046,152)
+  landmass:    #1 (129 territories)
+  land borders (2): DE, SE
+  sea links    (2): NO, SE
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+DJ  -  Djibouti
+  area:        23,200 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1226, 426); bounds (1222,421)-(1230,431)
+  landmass:    #1 (129 territories)
+  land borders (3): ER, ET, SO
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+DM  -  Dominica
+  area:        751 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (642, 403); bounds (642,402)-(643,404)
+  landmass:    #29 (1 territory)
+  land borders (0): -
+  sea links    (2): GP*, MQ*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+DO  -  Dominican Republic
+  area:        48,670 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (593, 381); bounds (585,374)-(604,388)
+  landmass:    #5 (2 territories)
+  land borders (1): HT
+  sea links    (1): PR
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+EC  -  Ecuador
+  area:        283,561 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (542, 511); bounds (528,494)-(559,533)
+  landmass:    #2 (25 territories)
+  land borders (2): CO, PE
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+EG  -  Egypt
+  area:        1,001,450 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1150, 332); bounds (1121,299)-(1190,361)
+  landmass:    #1 (129 territories)
+  land borders (5): IL, JO, LY, SA, SD
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SV  -  El Salvador
+  area:        21,041 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (487, 414); bounds (480,410)-(493,417)
+  landmass:    #2 (25 territories)
+  land borders (2): GT, HN
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GQ  -  Equatorial Guinea
+  area:        28,051 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1045, 491); bounds (1040,487)-(1050,495)
+  landmass:    #1 (129 territories)
+  land borders (2): CM, GA
+  sea links    (1): ST
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+ER  -  Eritrea
+  area:        117,600 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1203, 403); bounds (1191,387)-(1228,421)
+  landmass:    #1 (129 territories)
+  land borders (3): DJ, ET, SD
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+EE  -  Estonia
+  area:        45,228 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1105, 129); bounds (1093,124)-(1114,136)
+  landmass:    #1 (129 territories)
+  land borders (2): LV, RU
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+ET  -  Ethiopia
+  area:        1,104,300 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1210, 446); bounds (1173,407)-(1256,480)
+  landmass:    #1 (129 territories)
+  land borders (6): DJ, ER, KE, SD, SO, SS
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+FO  -  Faeroe Islands
+  area:        1,393 km2
+  type:        coastal, island archipelago
+  map:         7 svg part(s); anchor (955, 109); bounds (954,108)-(958,113)
+  landmass:    #31 (1 territory)
+  land borders (0): -
+  sea links    (3): GB, IS, NO
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+FK  -  Falkland Islands
+  area:        12,173 km2
+  type:        coastal, island archipelago
+  map:         11 svg part(s); anchor (701, 832); bounds (688,828)-(705,836)
+  landmass:    #30 (1 territory)
+  land borders (0): -
+  sea links    (1): AR
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+FM  -  Federated States of Micronesia
+  area:        702 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (1881, 458); bounds (1766,440)-(1909,468)
+  landmass:    #32 (1 territory)
+  land borders (0): -
+  sea links    (6): GU*, MH*, MP*, NR*, PG*, PW*
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+FJ  -  Fiji
+  area:        18,274 km2
+  type:        coastal, island archipelago
+  map:         10 svg part(s); anchor (1981, 616); bounds (1977,606)-(1994,625)
+  landmass:    #60 (1 territory)
+  land borders (0): -
+  sea links    (4): TO, TV*, VU, WS
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+FI  -  Finland
+  area:        338,145 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1100, 96); bounds (1073,65)-(1124,122)
+  landmass:    #1 (129 territories)
+  land borders (3): NO, RU, SE
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+FR  -  France
+  area:        551,695 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (998, 204); bounds (964,175)-(1036,235)
+  landmass:    #1 (129 territories)
+  land borders (6): BE, CH, DE, ES, IT, LU
+  sea links    (2): GB, IT
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GF  -  French Guiana
+  area:        83,534 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (685, 477); bounds (678,466)-(693,488)
+  landmass:    #2 (25 territories)
+  land borders (2): BR, SR
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PF  -  French Polynesia
+  area:        4,167 km2
+  type:        coastal, island archipelago
+  map:         15 svg part(s); anchor (151, 615); bounds (138,558)-(206,679)
+  landmass:    #46 (1 territory)
+  land borders (0): -
+  sea links    (2): AS*, WS*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+GA  -  Gabon
+  area:        267,667 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1053, 506); bounds (1036,487)-(1068,527)
+  landmass:    #1 (129 territories)
+  land borders (3): CG, CM, GQ
+  sea links    (1): ST
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GE  -  Georgia
+  area:        69,700 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1211, 231); bounds (1192,223)-(1228,238)
+  landmass:    #1 (129 territories)
+  land borders (4): AM, AZ, RU, TR
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+DE  -  Germany
+  area:        357,022 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1037, 175); bounds (1016,152)-(1059,198)
+  landmass:    #1 (129 territories)
+  land borders (9): AT, BE, CH, CZ, DK, FR, LU, NL, PL
+  sea links    (0): -
+  neighbors total: 9
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GH  -  Ghana
+  area:        238,533 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (979, 451); bounds (968,431)-(991,471)
+  landmass:    #1 (129 territories)
+  land borders (3): BF, CI, TG
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GR  -  Greece
+  area:        131,957 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1105, 249); bounds (1092,234)-(1126,277)
+  landmass:    #1 (129 territories)
+  land borders (4): AL, BG, MK, TR
+  sea links    (2): IT, TR
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GL  -  Greenland
+  area:        2,166,086 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (825, 46); bounds (721,1)-(943,121)
+  landmass:    #2 (25 territories)
+  land borders (1): CA
+  sea links    (2): CA, IS
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+GD  -  Grenada
+  area:        344 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (639, 424); bounds (639,423)-(639,425)
+  landmass:    #33 (1 territory)
+  land borders (0): -
+  sea links    (3): BB*, TT*, VC*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+GP  -  Guadeloupe
+  area:        1,628 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (641, 398); bounds (640,396)-(643,400)
+  landmass:    #59 (1 territory)
+  land borders (0): -
+  sea links    (3): AG*, DM*, MS*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+GU  -  Guam
+  area:        549 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1801, 416); bounds (1800,414)-(1801,417)
+  landmass:    #34 (1 territory)
+  land borders (0): -
+  sea links    (2): FM*, MP*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+GT  -  Guatemala
+  area:        108,889 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (480, 401); bounds (469,387)-(490,413)
+  landmass:    #2 (25 territories)
+  land borders (4): BZ, HN, MX, SV
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GN  -  Guinea
+  area:        245,857 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (924, 435); bounds (902,421)-(942,454)
+  landmass:    #1 (129 territories)
+  land borders (6): CI, GW, LR, ML, SL, SN
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GW  -  Guinea-Bissau
+  area:        36,125 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (901, 425); bounds (893,421)-(909,430)
+  landmass:    #1 (129 territories)
+  land borders (2): GN, SN
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GY  -  Guyana
+  area:        214,969 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (652, 471); bounds (639,449)-(665,493)
+  landmass:    #2 (25 territories)
+  land borders (3): BR, SR, VE
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+HT  -  Haiti
+  area:        27,750 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (581, 381); bounds (571,374)-(587,386)
+  landmass:    #5 (2 territories)
+  land borders (1): DO
+  sea links    (2): CU, JM
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+HN  -  Honduras
+  area:        112,090 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (500, 407); bounds (486,399)-(519,418)
+  landmass:    #2 (25 territories)
+  land borders (3): GT, NI, SV
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+HU  -  Hungary
+  area:        93,028 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1083, 200); bounds (1068,191)-(1099,208)
+  landmass:    #1 (129 territories)
+  land borders (7): AT, HR, RO, RS, SI, SK, UA
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+IS  -  Iceland
+  area:        103,000 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (906, 92); bounds (883,84)-(927,101)
+  landmass:    #10 (1 territory)
+  land borders (0): -
+  sea links    (3): FO, GL, NO
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+IN  -  India
+  area:        3,287,263 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1427, 355); bounds (1364,275)-(1519,450)
+  landmass:    #1 (129 territories)
+  land borders (6): BD, BT, CN, MM, NP, PK
+  sea links    (2): LK, MV
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+ID  -  Indonesia
+  area:        1,904,569 km2
+  type:        coastal, island archipelago
+  map:         13 svg part(s); anchor (1562, 504); bounds (1526,467)-(1785,568)
+  landmass:    #1 (129 territories)
+  land borders (3): MY, PG, TL
+  sea links    (3): AU, PH, PW*
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+IR  -  Iran
+  area:        1,648,195 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1279, 293); bounds (1218,248)-(1333,341)
+  landmass:    #1 (129 territories)
+  land borders (7): AF, AM, AZ, IQ, PK, TM, TR
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+IQ  -  Iraq
+  area:        438,317 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1222, 290); bounds (1196,262)-(1250,315)
+  landmass:    #1 (129 territories)
+  land borders (6): IR, JO, KW, SA, SY, TR
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+IE  -  Ireland
+  area:        70,273 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (948, 163); bounds (939,152)-(957,172)
+  landmass:    #6 (2 territories)
+  land borders (1): GB
+  sea links    (1): GB
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+IL  -  Israel
+  area:        22,072 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1176, 300); bounds (1173,289)-(1179,311)
+  landmass:    #1 (129 territories)
+  land borders (5): EG, JO, LB, PS, SY
+  sea links    (1): CY
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+IT  -  Italy
+  area:        301,340 km2
+  type:        coastal
+  map:         3 svg part(s); anchor (1049, 223); bounds (1021,201)-(1082,266)
+  landmass:    #1 (129 territories)
+  land borders (5): AT, CH, FR, HR, SI
+  sea links    (5): FR, GR, HR, MT, TN
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+JM  -  Jamaica
+  area:        10,991 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (554, 385); bounds (549,383)-(560,388)
+  landmass:    #11 (1 territory)
+  land borders (0): -
+  sea links    (3): CU, HT, KY
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+JP  -  Japan
+  area:        377,975 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (1714, 271); bounds (1684,210)-(1736,302)
+  landmass:    #12 (1 territory)
+  land borders (0): -
+  sea links    (3): KR, RU, TW
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+JO  -  Jordan
+  area:        89,342 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1186, 301); bounds (1177,288)-(1198,314)
+  landmass:    #1 (129 territories)
+  land borders (6): EG, IL, IQ, PS, SA, SY
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+KZ  -  Kazakhstan
+  area:        2,724,900 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1321, 194); bounds (1218,149)-(1418,241)
+  landmass:    #1 (129 territories)
+  land borders (5): CN, KG, RU, TM, UZ
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+KE  -  Kenya
+  area:        580,367 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1201, 498); bounds (1179,467)-(1223,531)
+  landmass:    #1 (129 territories)
+  land borders (5): ET, SO, SS, TZ, UG
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+XK  -  Kosovo
+  area:        10,887 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1094, 229); bounds (1090,225)-(1098,233)
+  landmass:    #1 (129 territories)
+  land borders (4): AL, ME, MK, RS
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+KW  -  Kuwait
+  area:        17,818 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1246, 314); bounds (1241,309)-(1250,318)
+  landmass:    #1 (129 territories)
+  land borders (2): IQ, SA
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+KG  -  Kyrgyzstan
+  area:        199,951 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1373, 236); bounds (1350,225)-(1400,250)
+  landmass:    #1 (129 territories)
+  land borders (4): CN, KZ, TJ, UZ
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+LA  -  Lao PDR
+  area:        236,800 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1566, 384); bounds (1544,358)-(1590,412)
+  landmass:    #1 (129 territories)
+  land borders (5): CN, KH, MM, TH, VN
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+LV  -  Latvia
+  area:        64,589 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1102, 140); bounds (1085,134)-(1118,147)
+  landmass:    #1 (129 territories)
+  land borders (4): BY, EE, LT, RU
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+LB  -  Lebanon
+  area:        10,452 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1179, 284); bounds (1176,280)-(1182,289)
+  landmass:    #1 (129 territories)
+  land borders (2): IL, SY
+  sea links    (1): CY
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+LS  -  Lesotho
+  area:        30,355 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1140, 692); bounds (1134,686)-(1146,698)
+  landmass:    #1 (129 territories)
+  land borders (1): ZA
+  sea links    (0): -
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+LR  -  Liberia
+  area:        111,369 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (933, 461); bounds (922,447)-(944,473)
+  landmass:    #1 (129 territories)
+  land borders (3): CI, GN, SL
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+LY  -  Libya
+  area:        1,759,540 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1085, 329); bounds (1038,290)-(1126,375)
+  landmass:    #1 (129 territories)
+  land borders (6): DZ, EG, NE, SD, TD, TN
+  sea links    (1): MT
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+LT  -  Lithuania
+  area:        65,300 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1099, 150); bounds (1086,143)-(1112,158)
+  landmass:    #1 (129 territories)
+  land borders (4): BY, LV, PL, RU
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+LU  -  Luxembourg
+  area:        2,586 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1016, 184); bounds (1015,181)-(1017,185)
+  landmass:    #1 (129 territories)
+  land borders (3): BE, DE, FR
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+MK  -  Macedonia
+  area:        25,713 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1099, 235); bounds (1093,231)-(1105,239)
+  landmass:    #1 (129 territories)
+  land borders (5): AL, BG, GR, RS, XK
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+MG  -  Madagascar
+  area:        587,041 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1247, 626); bounds (1227,580)-(1269,666)
+  landmass:    #14 (1 territory)
+  land borders (0): -
+  sea links    (6): KM, MU, MZ, RE*, SC, YT*
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MW  -  Malawi
+  area:        118,484 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1178, 587); bounds (1171,561)-(1187,609)
+  landmass:    #1 (129 territories)
+  land borders (3): MZ, TZ, ZM
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+MY  -  Malaysia
+  area:        330,803 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1636, 479); bounds (1553,458)-(1661,497)
+  landmass:    #1 (129 territories)
+  land borders (3): BN, ID, TH
+  sea links    (1): PH
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MV  -  Maldives
+  area:        298 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1403, 475); bounds (1403,475)-(1403,475)
+  landmass:    #36 (1 territory)
+  land borders (0): -
+  sea links    (2): IN, LK
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+ML  -  Mali
+  area:        1,240,192 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (967, 391); bounds (918,342)-(1010,437)
+  landmass:    #1 (129 territories)
+  land borders (7): BF, CI, DZ, GN, MR, NE, SN
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+MT  -  Malta
+  area:        316 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (1063, 271); bounds (1062,270)-(1064,272)
+  landmass:    #38 (1 territory)
+  land borders (0): -
+  sea links    (3): IT, LY, TN
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MH  -  Marshall Islands
+  area:        181 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1954, 456); bounds (1954,456)-(1955,456)
+  landmass:    #37 (1 territory)
+  land borders (0): -
+  sea links    (2): FM*, NR*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MQ  -  Martinique
+  area:        1,128 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (644, 408); bounds (643,406)-(645,409)
+  landmass:    #56 (1 territory)
+  land borders (0): -
+  sea links    (2): DM*, LC*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MR  -  Mauritania
+  area:        1,030,700 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (929, 372); bounds (892,327)-(959,407)
+  landmass:    #1 (129 territories)
+  land borders (5): DZ, EH, MA, ML, SN
+  sea links    (1): CV
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MU  -  Mauritius
+  area:        2,040 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (1307, 632); bounds (1306,628)-(1340,633)
+  landmass:    #41 (1 territory)
+  land borders (0): -
+  sea links    (2): MG, RE*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+YT  -  Mayotte
+  area:        374 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1240, 584); bounds (1240,583)-(1241,585)
+  landmass:    #57 (1 territory)
+  land borders (0): -
+  sea links    (2): KM*, MG*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MX  -  Mexico
+  area:        1,964,375 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (420, 348); bounds (354,292)-(504,408)
+  landmass:    #2 (25 territories)
+  land borders (3): BZ, GT, US
+  sea links    (1): CU
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MD  -  Moldova
+  area:        33,846 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1129, 200); bounds (1120,192)-(1136,210)
+  landmass:    #1 (129 territories)
+  land borders (2): RO, UA
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+MN  -  Mongolia
+  area:        1,564,116 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1504, 202); bounds (1421,170)-(1587,234)
+  landmass:    #1 (129 territories)
+  land borders (2): CN, RU
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+ME  -  Montenegro
+  area:        13,812 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1086, 227); bounds (1082,223)-(1090,232)
+  landmass:    #1 (129 territories)
+  land borders (5): AL, BA, HR, RS, XK
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MS  -  Montserrat
+  area:        102 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (638, 394); bounds (638,394)-(638,395)
+  landmass:    #40 (1 territory)
+  land borders (0): -
+  sea links    (3): AG*, GP*, KN*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MA  -  Morocco
+  area:        446,550 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (940, 310); bounds (892,272)-(980,364)
+  landmass:    #1 (129 territories)
+  land borders (4): DZ, EH, ES, MR
+  sea links    (1): ES
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MZ  -  Mozambique
+  area:        801,590 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1185, 613); bounds (1156,569)-(1215,674)
+  landmass:    #1 (129 territories)
+  land borders (6): MW, SZ, TZ, ZA, ZM, ZW
+  sea links    (2): KM, MG
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MM  -  Myanmar
+  area:        676,578 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1523, 367); bounds (1499,320)-(1548,437)
+  landmass:    #1 (129 territories)
+  land borders (5): BD, CN, IN, LA, TH
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+NA  -  Namibia
+  area:        825,615 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1081, 644); bounds (1052,611)-(1126,688)
+  landmass:    #1 (129 territories)
+  land borders (4): AO, BW, ZA, ZM
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+NR  -  Nauru
+  area:        21 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1933, 505); bounds (1933,505)-(1933,505)
+  landmass:    #43 (1 territory)
+  land borders (0): -
+  sea links    (4): FM*, MH*, SB*, TV*
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+NP  -  Nepal
+  area:        147,181 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1446, 321); bounds (1424,307)-(1471,332)
+  landmass:    #1 (129 territories)
+  land borders (2): CN, IN
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+NL  -  Netherlands
+  area:        41,850 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1013, 168); bounds (1004,160)-(1020,177)
+  landmass:    #1 (129 territories)
+  land borders (2): BE, DE
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+BQBO  -  Netherlands
+  area:        288 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (602, 424); bounds (601,423)-(602,424)
+  landmass:    #55 (1 territory)
+  land borders (0): -
+  sea links    (2): CW*, VE*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+NC  -  New Caledonia
+  area:        18,575 km2
+  type:        coastal, island archipelago
+  map:         8 svg part(s); anchor (1906, 639); bounds (1898,628)-(1920,647)
+  landmass:    #42 (1 territory)
+  land borders (0): -
+  sea links    (2): AU, VU
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+NZ  -  New Zealand
+  area:        268,838 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (1858, 784); bounds (1828,724)-(1929,800)
+  landmass:    #17 (1 territory)
+  land borders (0): -
+  sea links    (1): AU
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+NI  -  Nicaragua
+  area:        130,373 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (508, 419); bounds (494,406)-(519,432)
+  landmass:    #2 (25 territories)
+  land borders (2): CR, HN
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+NE  -  Niger
+  area:        1,267,000 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1038, 391); bounds (988,352)-(1074,426)
+  landmass:    #1 (129 territories)
+  land borders (8): BF, BJ, CM, DZ, LY, ML, NG, TD
+  sea links    (0): -
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+NG  -  Nigeria
+  area:        923,768 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1032, 441); bounds (1002,413)-(1068,474)
+  landmass:    #1 (129 territories)
+  land borders (3): BJ, CM, NE
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+MP  -  Northern Mariana Islands
+  area:        464 km2
+  type:        coastal, island archipelago
+  map:         6 svg part(s); anchor (1804, 404); bounds (1799,381)-(1804,411)
+  landmass:    #39 (1 territory)
+  land borders (0): -
+  sea links    (2): FM*, GU*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+NO  -  Norway
+  area:        323,802 km2
+  type:        coastal
+  map:         4 svg part(s); anchor (1045, 97); bounds (1009,13)-(1113,132)
+  landmass:    #1 (129 territories)
+  land borders (3): FI, RU, SE
+  sea links    (3): DK, FO, IS
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+OM  -  Oman
+  area:        309,500 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1298, 370); bounds (1277,333)-(1318,395)
+  landmass:    #1 (129 territories)
+  land borders (3): AE, SA, YE
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PK  -  Pakistan
+  area:        881,913 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1364, 310); bounds (1319,264)-(1401,349)
+  landmass:    #1 (129 territories)
+  land borders (4): AF, CN, IN, IR
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PW  -  Palau
+  area:        459 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1747, 454); bounds (1747,453)-(1748,454)
+  landmass:    #44 (1 territory)
+  land borders (0): -
+  sea links    (3): FM*, ID*, PH*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+PS  -  Palestine
+  area:        6,020 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1177, 297); bounds (1176,293)-(1179,300)
+  landmass:    #1 (129 territories)
+  land borders (2): IL, JO
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PA  -  Panama
+  area:        75,417 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (534, 447); bounds (518,440)-(549,455)
+  landmass:    #2 (25 territories)
+  land borders (2): CO, CR
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PG  -  Papua New Guinea
+  area:        462,840 km2
+  type:        coastal, island archipelago
+  map:         4 svg part(s); anchor (1803, 544); bounds (1783,519)-(1868,570)
+  landmass:    #1 (129 territories)
+  land borders (2): ID, SB
+  sea links    (3): AU, FM*, SB
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+PY  -  Paraguay
+  area:        406,752 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (663, 651); bounds (639,626)-(686,678)
+  landmass:    #2 (25 territories)
+  land borders (3): AR, BO, BR
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+PE  -  Peru
+  area:        1,285,216 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (566, 561); bounds (526,503)-(599,619)
+  landmass:    #2 (25 territories)
+  land borders (5): BO, BR, CL, CO, EC
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PH  -  Philippines
+  area:        300,000 km2
+  type:        coastal, island archipelago
+  map:         7 svg part(s); anchor (1668, 401); bounds (1649,383)-(1702,465)
+  landmass:    #15 (1 territory)
+  land borders (0): -
+  sea links    (4): ID, MY, PW*, TW
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+PL  -  Poland
+  area:        312,696 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1080, 169); bounds (1055,153)-(1104,188)
+  landmass:    #1 (129 territories)
+  land borders (7): BY, CZ, DE, LT, RU, SK, UA
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PT  -  Portugal
+  area:        92,090 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (944, 248); bounds (937,231)-(953,265)
+  landmass:    #1 (129 territories)
+  land borders (1): ES
+  sea links    (0): -
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+PR  -  Puerto Rico
+  area:        9,104 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (615, 385); bounds (607,383)-(622,386)
+  landmass:    #45 (1 territory)
+  land borders (0): -
+  sea links    (2): DO, VI
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+QA  -  Qatar
+  area:        11,586 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1268, 339); bounds (1266,335)-(1271,344)
+  landmass:    #1 (129 territories)
+  land borders (1): SA
+  sea links    (1): BH
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CG  -  Republic of Congo
+  area:        342,000 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1072, 507); bounds (1050,478)-(1091,533)
+  landmass:    #1 (129 territories)
+  land borders (5): AO, CD, CF, CM, GA
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+KR  -  Republic of Korea
+  area:        100,210 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1665, 268); bounds (1653,255)-(1676,281)
+  landmass:    #1 (129 territories)
+  land borders (1): KP
+  sea links    (1): JP
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+RE  -  Reunion
+  area:        2,511 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1295, 637); bounds (1294,636)-(1297,639)
+  landmass:    #58 (1 territory)
+  land borders (0): -
+  sea links    (2): MG*, MU*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+RO  -  Romania
+  area:        238,397 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1112, 208); bounds (1089,193)-(1136,222)
+  landmass:    #1 (129 territories)
+  land borders (5): BG, HU, MD, RS, UA
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+RU  -  Russian Federation
+  area:        17,098,242 km2
+  type:        coastal
+  map:         10 svg part(s); anchor (1423, 117); bounds (1080,10)-(1778,237)
+  landmass:    #1 (129 territories)
+  land borders (14): AZ, BY, CN, EE, FI, GE, KP, KZ, LT, LV, MN, NO, PL, UA
+  sea links    (2): JP, US
+  neighbors total: 16
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+RW  -  Rwanda
+  area:        26,338 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1156, 515); bounds (1151,510)-(1161,520)
+  landmass:    #1 (129 territories)
+  land borders (4): BI, CD, TZ, UG
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+BQSA  -  Saba (Netherlands)
+  area:        13 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (633, 389); bounds (633,389)-(633,389)
+  landmass:    #4 (3 territories)
+  land borders (1): BQSE
+  sea links    (1): SX*
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+KN  -  Saint Kitts and Nevis
+  area:        261 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (635, 390); bounds (635,390)-(636,392)
+  landmass:    #4 (3 territories)
+  land borders (1): BQSE
+  sea links    (3): AG*, BL*, MS*
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+LC  -  Saint Lucia
+  area:        616 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (644, 413); bounds (643,412)-(644,414)
+  landmass:    #35 (1 territory)
+  land borders (0): -
+  sea links    (3): BB*, MQ*, VC*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+VC  -  Saint Vincent and the Grenadines
+  area:        389 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (642, 417); bounds (642,416)-(642,417)
+  landmass:    #52 (1 territory)
+  land borders (0): -
+  sea links    (3): BB*, GD*, LC*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BL  -  Saint-Barthélemy
+  area:        21 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (635, 387); bounds (635,387)-(635,387)
+  landmass:    #3 (4 territories)
+  land borders (2): MF, SX
+  sea links    (1): KN*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+MF  -  Saint-Martin
+  area:        54 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (634, 386); bounds (634,386)-(634,386)
+  landmass:    #3 (4 territories)
+  land borders (3): AI, BL, SX
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+WS  -  Samoa
+  area:        2,842 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (17, 589); bounds (15,588)-(23,592)
+  landmass:    #54 (1 territory)
+  land borders (0): -
+  sea links    (4): AS, FJ, PF*, TO
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+SA  -  Saudi Arabia
+  area:        2,149,690 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1232, 347); bounds (1176,296)-(1295,396)
+  landmass:    #1 (129 territories)
+  land borders (9): AE, BH, EG, IQ, JO, KW, OM, QA, YE
+  sea links    (1): BH
+  neighbors total: 9
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SN  -  Senegal
+  area:        196,722 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (905, 410); bounds (888,395)-(922,422)
+  landmass:    #1 (129 territories)
+  land borders (5): GM, GN, GW, ML, MR
+  sea links    (1): CV
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+RS  -  Serbia
+  area:        88,361 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1093, 218); bounds (1082,206)-(1104,230)
+  landmass:    #1 (129 territories)
+  land borders (8): BA, BG, HR, HU, ME, MK, RO, XK
+  sea links    (0): -
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+SC  -  Seychelles
+  area:        459 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (1248, 562); bounds (1247,531)-(1301,562)
+  landmass:    #48 (1 territory)
+  land borders (0): -
+  sea links    (1): MG
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+SL  -  Sierra Leone
+  area:        71,740 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (920, 447); bounds (912,437)-(928,458)
+  landmass:    #1 (129 territories)
+  land borders (2): GN, LR
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SX  -  Sint Maarten
+  area:        34 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (634, 386); bounds (634,386)-(634,386)
+  landmass:    #3 (4 territories)
+  land borders (3): AI, BL, MF
+  sea links    (2): BQSA*, VI*
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+SK  -  Slovakia
+  area:        49,035 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1083, 190); bounds (1071,185)-(1098,196)
+  landmass:    #1 (129 territories)
+  land borders (5): AT, CZ, HU, PL, UA
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+SI  -  Slovenia
+  area:        20,273 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1062, 206); bounds (1056,202)-(1069,210)
+  landmass:    #1 (129 territories)
+  land borders (4): AT, HR, HU, IT
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SB  -  Solomon Islands
+  area:        28,896 km2
+  type:        coastal, island archipelago
+  map:         33 svg part(s); anchor (1886, 553); bounds (1866,545)-(1927,578)
+  landmass:    #1 (129 territories)
+  land borders (1): PG
+  sea links    (4): NR*, PG, TV*, VU
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+SO  -  Somalia
+  area:        637,657 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1246, 463); bounds (1219,425)-(1274,512)
+  landmass:    #1 (129 territories)
+  land borders (3): DJ, ET, KE
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+ZA  -  South Africa
+  area:        1,219,090 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1124, 688); bounds (1076,644)-(1166,725)
+  landmass:    #1 (129 territories)
+  land borders (6): BW, LS, MZ, NA, SZ, ZW
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SS  -  South Sudan
+  area:        644,329 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1157, 455); bounds (1123,424)-(1186,479)
+  landmass:    #1 (129 territories)
+  land borders (6): CD, CF, ET, KE, SD, UG
+  sea links    (0): -
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+ES  -  Spain
+  area:        505,992 km2
+  type:        coastal
+  map:         8 svg part(s); anchor (967, 243); bounds (887,222)-(1002,324)
+  landmass:    #1 (129 territories)
+  land borders (3): FR, MA, PT
+  sea links    (2): DZ, MA
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+LK  -  Sri Lanka
+  area:        65,610 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1442, 452); bounds (1437,440)-(1449,463)
+  landmass:    #13 (1 territory)
+  land borders (0): -
+  sea links    (2): IN, MV
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+BQSE  -  St. Eustatius (Netherlands)
+  area:        21 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (634, 390); bounds (634,389)-(634,390)
+  landmass:    #4 (3 territories)
+  land borders (2): BQSA, KN
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+SD  -  Sudan
+  area:        1,861,484 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1154, 399); bounds (1110,361)-(1200,446)
+  landmass:    #1 (129 territories)
+  land borders (7): CF, EG, ER, ET, LY, SS, TD
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SR  -  Suriname
+  area:        163,820 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (670, 475); bounds (658,463)-(681,490)
+  landmass:    #2 (25 territories)
+  land borders (3): BR, GF, GY
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+SZ  -  Swaziland
+  area:        17,364 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1159, 672); bounds (1155,667)-(1162,677)
+  landmass:    #1 (129 territories)
+  land borders (2): MZ, ZA
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+SE  -  Sweden
+  area:        450,295 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1059, 107); bounds (1037,70)-(1088,149)
+  landmass:    #1 (129 territories)
+  land borders (3): DK, FI, NO
+  sea links    (1): DK
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+CH  -  Switzerland
+  area:        41,284 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1027, 202); bounds (1017,196)-(1038,208)
+  landmass:    #1 (129 territories)
+  land borders (4): AT, DE, FR, IT
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+SY  -  Syria
+  area:        185,180 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1192, 277); bounds (1178,263)-(1210,294)
+  landmass:    #1 (129 territories)
+  land borders (5): IL, IQ, JO, LB, TR
+  sea links    (1): CY
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+ST  -  São Tomé and Principe
+  area:        964 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (1024, 500); bounds (1023,491)-(1029,501)
+  landmass:    #47 (1 territory)
+  land borders (0): -
+  sea links    (2): GA, GQ
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+TW  -  Taiwan
+  area:        36,193 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1656, 349); bounds (1651,340)-(1659,360)
+  landmass:    #16 (1 territory)
+  land borders (0): -
+  sea links    (3): CN, JP, PH
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+TJ  -  Tajikistan
+  area:        144,100 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1360, 254); bounds (1341,240)-(1382,265)
+  landmass:    #1 (129 territories)
+  land borders (4): AF, CN, KG, UZ
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+TZ  -  Tanzania
+  area:        945,087 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1184, 543); bounds (1154,508)-(1213,577)
+  landmass:    #1 (129 territories)
+  land borders (7): BI, KE, MW, MZ, RW, UG, ZM
+  sea links    (1): KM
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+TH  -  Thailand
+  area:        513,120 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1553, 405); bounds (1531,371)-(1579,465)
+  landmass:    #1 (129 territories)
+  land borders (4): KH, LA, MM, MY
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GM  -  The Gambia
+  area:        11,295 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (899, 415); bounds (892,413)-(908,417)
+  landmass:    #1 (129 territories)
+  land borders (1): SN
+  sea links    (0): -
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+TL  -  Timor-Leste
+  area:        14,874 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1698, 558); bounds (1693,555)-(1705,562)
+  landmass:    #1 (129 territories)
+  land borders (1): ID
+  sea links    (0): -
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+TG  -  Togo
+  area:        56,785 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (992, 448); bounds (987,431)-(996,463)
+  landmass:    #1 (129 territories)
+  land borders (3): BF, BJ, GH
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+TO  -  Tonga
+  area:        747 km2
+  type:        coastal, island archipelago
+  map:         5 svg part(s); anchor (13, 638); bounds (1,602)-(15,639)
+  landmass:    #50 (1 territory)
+  land borders (0): -
+  sea links    (2): FJ, WS
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+TT  -  Trinidad and Tobago
+  area:        5,128 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (641, 435); bounds (638,429)-(645,437)
+  landmass:    #2 (25 territories)
+  land borders (1): VE
+  sea links    (3): BB*, GD*, VE
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+TN  -  Tunisia
+  area:        163,610 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1037, 282); bounds (1027,262)-(1048,306)
+  landmass:    #1 (129 territories)
+  land borders (2): DZ, LY
+  sea links    (2): IT, MT
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+TR  -  Turkey
+  area:        783,562 km2
+  type:        coastal
+  map:         2 svg part(s); anchor (1172, 252); bounds (1122,232)-(1223,271)
+  landmass:    #1 (129 territories)
+  land borders (8): AM, AZ, BG, GE, GR, IQ, IR, SY
+  sea links    (2): CY, GR
+  neighbors total: 9
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+TM  -  Turkmenistan
+  area:        488,100 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1298, 251); bounds (1259,228)-(1338,275)
+  landmass:    #1 (129 territories)
+  land borders (4): AF, IR, KZ, UZ
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+TC  -  Turks and Caicos Islands
+  area:        948 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (585, 362); bounds (585,361)-(589,362)
+  landmass:    #49 (1 territory)
+  land borders (0): -
+  sea links    (1): BS
+  neighbors total: 1
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+TV  -  Tuvalu
+  area:        26 km2
+  type:        coastal, island archipelago
+  map:         1 svg part(s); anchor (1999, 556); bounds (1999,556)-(1999,557)
+  landmass:    #51 (1 territory)
+  land borders (0): -
+  sea links    (3): FJ*, NR*, SB*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+UG  -  Uganda
+  area:        241,550 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1169, 492); bounds (1154,475)-(1184,511)
+  landmass:    #1 (129 territories)
+  land borders (5): CD, KE, RW, SS, TZ
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+UA  -  Ukraine
+  area:        603,550 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1142, 189); bounds (1097,168)-(1185,217)
+  landmass:    #1 (129 territories)
+  land borders (7): BY, HU, MD, PL, RO, RU, SK
+  sea links    (0): -
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+AE  -  United Arab Emirates
+  area:        83,600 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1286, 349); bounds (1272,335)-(1297,357)
+  landmass:    #1 (129 territories)
+  land borders (2): OM, SA
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+GB  -  United Kingdom
+  area:        243,610 km2
+  type:        coastal, island archipelago
+  map:         2 svg part(s); anchor (974, 159); bounds (951,130)-(994,182)
+  landmass:    #6 (2 territories)
+  land borders (1): IE
+  sea links    (3): FO, FR, IE
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+US  -  United States
+  area:        9,833,517 km2
+  type:        coastal
+  map:         10 svg part(s); anchor (467, 250); bounds (100,58)-(646,379)
+  landmass:    #2 (25 territories)
+  land borders (2): CA, MX
+  sea links    (4): BM*, BS, CU, RU
+  neighbors total: 6
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+VI  -  United States Virgin Islands
+  area:        347 km2
+  type:        coastal, island archipelago
+  map:         3 svg part(s); anchor (624, 388); bounds (623,384)-(625,388)
+  landmass:    #7 (2 territories)
+  land borders (1): VG
+  sea links    (2): PR, SX*
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+UY  -  Uruguay
+  area:        176,215 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (684, 712); bounds (672,696)-(699,726)
+  landmass:    #2 (25 territories)
+  land borders (2): AR, BR
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+UZ  -  Uzbekistan
+  area:        447,400 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1314, 234); bounds (1271,210)-(1366,263)
+  landmass:    #1 (129 territories)
+  land borders (5): AF, KG, KZ, TJ, TM
+  sea links    (0): -
+  neighbors total: 5
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+VU  -  Vanuatu
+  area:        12,189 km2
+  type:        coastal, island archipelago
+  map:         18 svg part(s); anchor (1923, 600); bounds (1921,586)-(1932,632)
+  landmass:    #53 (1 territory)
+  land borders (0): -
+  sea links    (3): FJ, NC, SB
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Offshore rig, Fortress, Wall, Radar, Barracks
+
+VE  -  Venezuela
+  area:        912,050 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (612, 456); bounds (573,424)-(648,497)
+  landmass:    #2 (25 territories)
+  land borders (4): BR, CO, GY, TT
+  sea links    (4): AW*, BQBO*, CW*, TT
+  neighbors total: 7
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+VN  -  Vietnam
+  area:        331,212 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1581, 395); bounds (1554,353)-(1602,446)
+  landmass:    #1 (129 territories)
+  land borders (3): CN, KH, LA
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+EH  -  Western Sahara
+  area:        266,000 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (919, 346); bounds (892,325)-(939,366)
+  landmass:    #1 (129 territories)
+  land borders (3): DZ, MA, MR
+  sea links    (0): -
+  neighbors total: 3
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+YE  -  Yemen
+  area:        527,968 km2
+  type:        coastal
+  map:         1 svg part(s); anchor (1253, 400); bounds (1226,380)-(1283,421)
+  landmass:    #1 (129 territories)
+  land borders (2): OM, SA
+  sea links    (0): -
+  neighbors total: 2
+  buildings:   Gold mine, Market, Fishing harbor, Fortress, Wall, Radar, Barracks
+
+ZM  -  Zambia
+  area:        752,618 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1142, 588); bounds (1109,555)-(1175,617)
+  landmass:    #1 (129 territories)
+  land borders (8): AO, BW, CD, MW, MZ, NA, TZ, ZW
+  sea links    (0): -
+  neighbors total: 8
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks
+
+ZW  -  Zimbabwe
+  area:        390,757 km2
+  type:        landlocked
+  map:         1 svg part(s); anchor (1153, 623); bounds (1128,602)-(1170,644)
+  landmass:    #1 (129 territories)
+  land borders (4): BW, MZ, ZA, ZM
+  sea links    (0): -
+  neighbors total: 4
+  buildings:   Gold mine, Market, Fortress, Wall, Radar, Barracks

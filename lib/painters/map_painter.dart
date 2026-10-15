@@ -417,15 +417,15 @@ class MapBadge {
 /// The badge layer: a building icon in the centre of each province that
 /// has one, with its power as a small number right under it.
 ///
-/// Badges are sized to their province, so a tiny country never gets an icon
-/// bigger than itself:
+/// Badges are sized to their province, but never below a readable size:
 ///  * the icon is [iconSize] at most, and never more than [_iconShare] of
 ///    the province's [MapBadge.extent];
-///  * while that icon would be smaller than [_minIconPx] on screen, a small
-///    dot marks the building instead (and nothing at all if even the
-///    province itself is only a few pixels wide);
-///  * the power number follows the same rule with [powerSize], and only
-///    shows once the map is zoomed in to [powerMinScale].
+///  * a tiny country (the Maldives, Palau...) would get an unreadable icon
+///    from that rule, so it is drawn at least [_tinyIconPx] pixels tall on
+///    screen, even if that is bigger than the country itself;
+///  * the power number follows the same rules with [powerSize] and
+///    [_tinyPowerPx], and only shows once the map is zoomed in to
+///    [powerMinScale].
 ///
 /// Everything is drawn in a dark shade of the owner's color, so it reads as
 /// part of the map instead of as black stickers.
@@ -456,12 +456,10 @@ class BadgePainter extends CustomPainter {
   static const double _iconShare = 0.45;
   static const double _powerShare = 0.3;
 
-  /// Smallest icon / number worth drawing, in screen pixels.
-  static const double _minIconPx = 9;
-  static const double _minPowerPx = 8;
-
-  /// A province narrower than this on screen gets no marker at all.
-  static const double _minDotProvincePx = 5;
+  /// Smallest icon / number height, in screen pixels. Tiny countries are
+  /// drawn at this size, larger than the country itself.
+  static const double _tinyIconPx = 14;
+  static const double _tinyPowerPx = 12;
 
   /// How dark the owner's color gets for icons, and how opaque they are.
   static const double _inkMix = 0.62;
@@ -532,18 +530,17 @@ class BadgePainter extends CustomPainter {
     final showPower = scale >= powerMinScale;
 
     for (final badge in badges) {
-      final provincePx = badge.extent * scale;
       final color = _tint(badge.color);
 
       // Sized to the province, capped at the normal size.
       final icon = badge.icon;
-      final iconMapSize = min(iconSize, badge.extent * _iconShare);
-      final iconFits = icon != null && iconMapSize * scale >= _minIconPx;
+      final iconMapSize =
+          min(iconSize, max(badge.extent * _iconShare, _tinyIconPx / scale));
+      final iconFits = icon != null;
 
-      final powerMapSize = min(powerSize, badge.extent * _powerShare);
-      final showNumber = showPower &&
-          badge.power > 0 &&
-          powerMapSize * scale >= _minPowerPx;
+      final powerMapSize =
+          min(powerSize, max(badge.extent * _powerShare, _tinyPowerPx / scale));
+      final showNumber = showPower && badge.power > 0;
 
       canvas.save();
       canvas.translate(badge.anchor.dx, badge.anchor.dy);
@@ -555,26 +552,7 @@ class BadgePainter extends CustomPainter {
         );
       }
 
-      if (icon != null && !iconFits) {
-        // Too small for the icon: a dot, unless the province itself is a
-        // speck on screen.
-        if (provincePx >= _minDotProvincePx) {
-          final radius = (provincePx * 0.1).clamp(1.5, 3.5) / scale;
-          canvas.drawCircle(
-            Offset.zero,
-            radius,
-            Paint()..color = color,
-          );
-          canvas.drawCircle(
-            Offset.zero,
-            radius,
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 0.8 / scale
-              ..color = Colors.white.withAlpha(200),
-          );
-        }
-      } else if (icon != null) {
+      if (icon != null) {
         final painter = _iconPainter(icon, iconMapSize, color);
         painter.paint(
           canvas,

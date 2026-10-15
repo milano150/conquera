@@ -13,6 +13,7 @@ import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
 import '../painters/map_painter.dart';
+import '../screens/how_to_play_screen.dart';
 import '../screens/updates_screen.dart';
 import '../services/firestore_service.dart';
 import '../state/map_controller.dart';
@@ -1144,7 +1145,10 @@ class _MapScreenState extends State<MapScreen>
       // the first one.
       final p = e.localPosition;
       final w = _controller.mapSize.width;
-      _controller.selectAt(w > 0 ? Offset(p.dx % w, p.dy) : p);
+      _controller.selectAt(
+        w > 0 ? Offset(p.dx % w, p.dy) : p,
+        scale: _transform.value.getMaxScaleOnAxis(),
+      );
     }
   }
 
@@ -1253,6 +1257,14 @@ class _MapScreenState extends State<MapScreen>
           players: _players,
         ),
       ),
+    );
+  }
+
+  /// Opens the How to play screen.
+  void _openHowToPlay() {
+    setState(() => _sidebarOpen = false);
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const HowToPlayScreen()),
     );
   }
 
@@ -1478,6 +1490,7 @@ class _MapScreenState extends State<MapScreen>
             provinces: _provinceStates,
             myUid: _uid,
             onOpenUpdates: _openUpdates,
+            onOpenHowToPlay: _openHowToPlay,
           ),
         ],
       ),

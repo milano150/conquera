@@ -32,6 +32,9 @@ class WorldSidebar extends StatefulWidget {
   /// Opens the Updates (war log) screen.
   final VoidCallback onOpenUpdates;
 
+  /// Opens the How to play screen.
+  final VoidCallback onOpenHowToPlay;
+
   const WorldSidebar({
     super.key,
     required this.open,
@@ -41,6 +44,7 @@ class WorldSidebar extends StatefulWidget {
     required this.provinces,
     this.myUid,
     required this.onOpenUpdates,
+    required this.onOpenHowToPlay,
   });
 
   @override
@@ -123,6 +127,7 @@ class _WorldSidebarState extends State<WorldSidebar>
                   provinces: widget.provinces,
                   myUid: widget.myUid,
                   onOpenUpdates: widget.onOpenUpdates,
+                  onOpenHowToPlay: widget.onOpenHowToPlay,
                 ),
               ),
             ),
@@ -139,6 +144,7 @@ class _Panel extends StatefulWidget {
   final ValueListenable<Map<String, ProvinceState>> provinces;
   final String? myUid;
   final VoidCallback onOpenUpdates;
+  final VoidCallback onOpenHowToPlay;
 
   const _Panel({
     required this.worldId,
@@ -146,6 +152,7 @@ class _Panel extends StatefulWidget {
     required this.provinces,
     required this.myUid,
     required this.onOpenUpdates,
+    required this.onOpenHowToPlay,
   });
 
   @override
@@ -209,8 +216,8 @@ class _PanelState extends State<_Panel> {
           onTap: () => setState(() => _showLeaderboard = true),
         ),
         _Item(label: 'Updates', onTap: widget.onOpenUpdates),
-        // Nothing behind these yet.
-        _Item(label: 'How to play', onTap: () {}),
+        _Item(label: 'How to play', onTap: widget.onOpenHowToPlay),
+        // Nothing behind this yet.
         _Item(label: 'Settings', onTap: () {}),
         const Spacer(),
         Padding(

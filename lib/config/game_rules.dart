@@ -240,7 +240,7 @@ class GameRules {
   static const BuildingDef radar = BuildingDef(
     id: 'radar',
     name: 'Radar',
-    icon: Icons.radar,
+    icon: Icons.settings_input_antenna,
     cost: 55,
     revealsNeighbors: true,
     effect: 'shows the buildings and power of bordering territories',

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -17,6 +18,7 @@ class MapController extends ChangeNotifier {
   Map<String, Set<String>> _neighbors = const {};
   Size _mapSize = Size.zero;
   String? _selectedProvinceId;
+  final Map<String, _TapTarget> _tapTargets = {};
   bool _isLoaded = false;
   Object? _loadError;
 
@@ -40,6 +42,7 @@ class MapController extends ChangeNotifier {
       final result = await SvgMapParser.parseAsset(assetPath);
       _provinces = result.provinces;
       _provinceLookup = {for (final p in _provinces) p.id: p};
+      _buildTapTargets();
       _mapSize = result.size;
       final neighbors = <String, Set<String>>{
         for (final e in BorderFinder.find(_provinces, _mapSize).entries)
@@ -69,7 +72,11 @@ class MapController extends ChangeNotifier {
 
   /// Hit-tests [scenePoint] (already in map/canvas coordinates) and updates
   /// the selection. Tapping the ocean clears it.
-  void selectAt(Offset scenePoint) {
+  ///
+  /// [scale] is the current camera zoom (screen pixels per map unit). It
+  /// lets tiny territories be hit from a few pixels away, see
+  /// [_nearestTinyProvince].
+  void selectAt(Offset scenePoint, {double scale = 1}) {
     Province? hit;
 
     for (final province in _provinces) {
@@ -81,9 +88,73 @@ class MapController extends ChangeNotifier {
       }
     }
 
+    // Missed every shape exactly: give tiny territories a bigger touch area.
+    hit ??= _nearestTinyProvince(scenePoint, scale);
+
     if (hit?.id == _selectedProvinceId) return; // nothing changed
     _selectedProvinceId = hit?.id;
     notifyListeners();
+  }
+
+  /// A territory whose biggest piece is smaller than this many map units
+  /// is a candidate for the bigger touch area.
+  static const double _tinyMaxSide = 40;
+
+  /// How far (screen pixels) from a tiny territory's outline a tap still
+  /// selects it. 22 px each way makes a 44 px touch target.
+  static const double _touchRadiusPx = 22;
+
+  /// The help only applies while the territory is drawn smaller than this
+  /// on screen, so it fades out as the player zooms in.
+  static const double _helpBelowPx = 44;
+
+  /// Stores outline points for every tiny territory, once, after loading.
+  void _buildTapTargets() {
+    _tapTargets.clear();
+    for (final p in _provinces) {
+      final metrics = p.path.computeMetrics().toList();
+      var biggest = 0.0;
+      for (final m in metrics) {
+        final b = m.extractPath(0, m.length).getBounds();
+        biggest = math.max(biggest, math.max(b.width, b.height));
+      }
+      if (biggest >= _tinyMaxSide) continue;
+
+      final samples = <Offset>[];
+      for (final m in metrics) {
+        samples.add(m.extractPath(0, m.length).getBounds().center);
+        for (var d = 0.0; d < m.length; d += 2) {
+          final t = m.getTangentForOffset(d);
+          if (t != null) samples.add(t.position);
+        }
+      }
+      _tapTargets[p.id] = _TapTarget(biggest, samples);
+    }
+  }
+
+  /// The tiny territory closest to [point], if one lies within the touch
+  /// radius. Distances wrap around the map edge, like the world does.
+  Province? _nearestTinyProvince(Offset point, double scale) {
+    if (scale <= 0) return null;
+    final wrap = _mapSize.width;
+    var bestDistance = _touchRadiusPx / scale;
+    String? bestId;
+
+    for (final entry in _tapTargets.entries) {
+      final target = entry.value;
+      if (target.maxSide * scale >= _helpBelowPx) continue;
+      for (final s in target.samples) {
+        var dx = (s.dx - point.dx).abs();
+        if (wrap > 0 && dx > wrap / 2) dx = wrap - dx;
+        final dy = s.dy - point.dy;
+        final d = math.sqrt(dx * dx + dy * dy);
+        if (d < bestDistance) {
+          bestDistance = d;
+          bestId = entry.key;
+        }
+      }
+    }
+    return bestId == null ? null : _provinceLookup[bestId];
   }
 
   void clearSelection() {
@@ -91,4 +162,12 @@ class MapController extends ChangeNotifier {
     _selectedProvinceId = null;
     notifyListeners();
   }
+}
+
+/// Outline points of one tiny territory, and the size of its biggest piece.
+class _TapTarget {
+  final double maxSide;
+  final List<Offset> samples;
+
+  const _TapTarget(this.maxSide, this.samples);
 }
