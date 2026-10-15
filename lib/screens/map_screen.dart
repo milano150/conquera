@@ -312,8 +312,10 @@ class _MapScreenState extends State<MapScreen>
     final scale = _minScaleFor(viewport);
 
     // Start on the player's own land if we know where it is, otherwise on
-    // Africa. The camera keeps itself inside the vertical limits.
-    final focus = _homePoint() ??
+    // Africa. A player who just spawned starts zoomed out on Africa and
+    // then flies in slowly to their country (see _spawnFlight).
+    final justSpawned = widget.focusProvinceId != null && !_spawnFlightDone;
+    final focus = (justSpawned ? null : _homePoint()) ??
         _africaRect()?.center ??
         map.center(Offset.zero);
 
@@ -324,6 +326,33 @@ class _MapScreenState extends State<MapScreen>
       ..translate(dx, dy)
       ..scale(scale);
     _fittedFor = viewport;
+    if (justSpawned) _spawnFlight();
+  }
+
+  bool _spawnFlightDone = false;
+
+  /// After spawning: a slow pan and zoom from the world view to the
+  /// player's starting country.
+  Future<void> _spawnFlight() async {
+    _spawnFlightDone = true;
+    final id = widget.focusProvinceId;
+    final target = id == null ? null : _controller.provinceById(id);
+    if (target == null) return;
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+
+    final side = max(target.bounds.longestSide, 1.0);
+    final shortSide = min(_viewport.width, _viewport.height);
+    // Zoom until the country fills roughly 40% of the screen.
+    final wanted = (shortSide * 0.4) / side;
+
+    final normal = _cam.duration;
+    _cam.duration = const Duration(milliseconds: 3500);
+    try {
+      await _panTo(target.anchor, minScale: wanted);
+    } finally {
+      _cam.duration = normal;
+    }
   }
 
   /// Where the player's land is: the country they just spawned in, or else

@@ -151,6 +151,9 @@ class GameRules {
   /// first claim, and a mine or two.
   static const int startingGold = 100;
 
+  /// Power a new player's starting territory begins with.
+  static const double startingTroops = 10;
+
   /// How long a player must wait between attacks (win or lose).
   static const Duration attackCooldown = Duration(seconds: 2);
 

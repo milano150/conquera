@@ -95,17 +95,26 @@ class _JoinScreenState extends State<JoinScreen> {
     });
   }
 
-  /// Countries a new player can start in: every country except the tiny
-  /// ones (smaller than the median), so nobody spawns on a speck.
+  /// Countries a new player can start in: anything bigger than Djibouti
+  /// (so nobody spawns on a small island nation). If Djibouti isn't on the
+  /// map, falls back to the median size.
   List<String> _spawnCandidates(List<Province> provinces) {
     final usable = provinces.where((p) => p.id != 'AQ').toList();
     if (usable.isEmpty) return const [];
     double area(Province p) => p.bounds.width * p.bounds.height;
-    final areas = usable.map(area).toList()..sort();
-    final median = areas[areas.length ~/ 2];
+
+    double? minArea;
+    for (final p in usable) {
+      if (p.id == 'DJ') minArea = area(p);
+    }
+    if (minArea == null) {
+      final areas = usable.map(area).toList()..sort();
+      minArea = areas[areas.length ~/ 2];
+    }
+    final threshold = minArea;
     return [
       for (final p in usable)
-        if (area(p) >= median) p.id,
+        if (area(p) > threshold) p.id,
     ];
   }
 

@@ -1045,7 +1045,7 @@ class FirestoreService {
 
         tx.set(provinceRef, {
           'ownerId': uid,
-          'troops': 0,
+          'troops': GameRules.startingTroops,
           'troopsUpdatedAt': FieldValue.serverTimestamp(),
           'building': {'type': 'none', 'level': 0},
         });
