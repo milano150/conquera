@@ -424,6 +424,13 @@ class _MapScreenState extends State<MapScreen>
     if (mounted) unawaited(_flyToTerritory(id));
   }
 
+  /// Quit button of the death screen: deletes the player from the world and
+  /// goes back to the home screen.
+  Future<void> _quit() async {
+    await _firestore.quitWorld(gameId: widget.gameId, uid: _uid);
+    if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
   /// Where the player's land is: the country they just spawned in, or else
   /// any country they own. Null if neither is known yet.
   Offset? _homePoint() {
@@ -1552,6 +1559,7 @@ class _MapScreenState extends State<MapScreen>
               loadLastInvasion: () =>
                   _firestore.lastInvasion(gameId: widget.gameId, uid: _uid),
               onRespawn: _respawn,
+              onQuit: _quit,
             ),
           ),
         ],

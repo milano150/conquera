@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,8 +14,8 @@ import 'player_tag.dart';
 /// Full-screen "You died" screen. Put it on top of everything in a Stack
 /// that fills the screen. It watches the live world data itself: when the
 /// player has joined but owns no territory any more, it fades in, shows who
-/// took the last one, and offers a Respawn button. It fades out again as
-/// soon as the player owns a territory.
+/// took the last one, and offers Respawn and Quit buttons. It fades out
+/// again as soon as the player owns a territory.
 class DeathOverlay extends StatefulWidget {
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
@@ -33,6 +34,10 @@ class DeathOverlay extends StatefulWidget {
   /// Puts the player back in the world. May throw [GameActionException].
   final Future<void> Function() onRespawn;
 
+  /// Removes the player from the world for good. May throw
+  /// [GameActionException]. The caller leaves the screen when it succeeds.
+  final Future<void> Function() onQuit;
+
   const DeathOverlay({
     super.key,
     required this.players,
@@ -42,6 +47,7 @@ class DeathOverlay extends StatefulWidget {
     required this.provinceName,
     required this.loadLastInvasion,
     required this.onRespawn,
+    required this.onQuit,
   });
 
   @override
@@ -64,6 +70,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
   bool _invasionLoaded = false;
 
   bool _busy = false;
+  bool _quitting = false;
   String? _error;
 
   bool get _noTerritories {
@@ -101,6 +108,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
         setState(() {
           _dead = false;
           _busy = false;
+          _quitting = false;
           _error = null;
         });
       }
@@ -133,7 +141,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
   }
 
   Future<void> _respawn() async {
-    if (_busy) return;
+    if (_busy || _quitting) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -151,6 +159,62 @@ class _DeathOverlayState extends State<DeathOverlay> {
       if (mounted) setState(() {
         _busy = false;
         _error = 'Could not respawn. Try again.';
+      });
+    }
+  }
+
+  Future<void> _quit() async {
+    if (_busy || _quitting) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: ConqueraColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: ConqueraColors.divider),
+        ),
+        title: Text('Quit this world?', style: ConqueraText.name),
+        content: Text(
+          'Your player is deleted from this world. '
+          'You can join again later as a new player.',
+          style: ConqueraText.value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ConqueraColors.danger,
+              side: const BorderSide(color: ConqueraColors.danger),
+            ),
+            child: const Text('Quit'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _quitting = true;
+      _error = null;
+    });
+    try {
+      // The caller leaves the screen once the player is gone.
+      await widget.onQuit();
+    } on GameActionException catch (e) {
+      if (mounted) setState(() {
+        _quitting = false;
+        _error = e.message;
+      });
+    } catch (e) {
+      debugPrint('Quit failed: $e');
+      if (mounted) setState(() {
+        _quitting = false;
+        _error = 'Could not quit. Try again.';
       });
     }
   }
@@ -178,103 +242,143 @@ class _DeathOverlayState extends State<DeathOverlay> {
     final invasion = _invasion;
     final invader =
         invasion == null ? null : widget.players.value[invasion.attackerId];
+    final busy = _busy || _quitting;
 
-    const white = Colors.white;
-    final soft = Colors.white.withAlpha(165);
-
-    return GestureDetector(
+    // Material ancestor: without one, Text falls back to the yellow
+    // double-underline debug style.
+    return Material(
+      type: MaterialType.transparency,
+      child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {}, // swallow taps so the map underneath stays untouched
-      child: ColoredBox(
-        color: ConqueraColors.ink.withAlpha(240),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: Padding(
-                padding: const EdgeInsets.all(ConqueraSpace.lg),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      'You died',
-                      style: ConqueraText.title.copyWith(
-                        fontSize: 44,
-                        color: white,
-                        fontWeight: FontWeight.w600,
-                      ),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+        child: ColoredBox(
+          color: ConqueraColors.sea.withAlpha(170),
+          child: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 340),
+                child: Padding(
+                  padding: const EdgeInsets.all(ConqueraSpace.md),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: ConqueraColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: ConqueraColors.divider),
                     ),
-                    const SizedBox(height: ConqueraSpace.md),
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 250),
-                      alignment: Alignment.topCenter,
-                      child: _invasionLoaded
-                          ? _who(invasion, invader, soft, white)
-                          : const SizedBox(width: double.infinity),
-                    ),
-                    const SizedBox(height: ConqueraSpace.xl),
-                    SizedBox(
-                      width: 200,
-                      height: 48,
-                      child: FilledButton(
-                        onPressed: _busy ? null : _respawn,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: white,
-                          foregroundColor: ConqueraColors.ink,
-                          disabledBackgroundColor: white.withAlpha(150),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.all(ConqueraSpace.lg),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'ELIMINATED',
+                            textAlign: TextAlign.center,
+                            style: ConqueraText.label.copyWith(
+                              color: ConqueraColors.danger,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.8,
+                            ),
                           ),
-                        ),
-                        child: _busy
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: ConqueraColors.ink,
+                          const SizedBox(height: ConqueraSpace.sm),
+                          Text(
+                            'You died',
+                            textAlign: TextAlign.center,
+                            style: ConqueraText.title.copyWith(fontSize: 40),
+                          ),
+                          const SizedBox(height: ConqueraSpace.md),
+                          const Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: ConqueraColors.divider,
+                          ),
+                          const SizedBox(height: ConqueraSpace.md),
+                          AnimatedSize(
+                            duration: const Duration(milliseconds: 250),
+                            alignment: Alignment.topCenter,
+                            child: _invasionLoaded
+                                ? _who(invasion, invader)
+                                : const SizedBox(width: double.infinity),
+                          ),
+                          const SizedBox(height: ConqueraSpace.lg),
+                          SizedBox(
+                            height: 44,
+                            child: FilledButton(
+                              onPressed: busy ? null : _respawn,
+                              child: _busy
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Respawn'),
+                            ),
+                          ),
+                          const SizedBox(height: ConqueraSpace.sm),
+                          SizedBox(
+                            height: 44,
+                            child: OutlinedButton(
+                              onPressed: busy ? null : _quit,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: ConqueraColors.danger,
+                                side: BorderSide(
+                                  color: busy
+                                      ? ConqueraColors.divider
+                                      : ConqueraColors.danger,
                                 ),
-                              )
-                            : Text(
-                                'Respawn',
-                                style: ConqueraText.button
-                                    .copyWith(color: ConqueraColors.ink),
                               ),
+                              child: _quitting
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: ConqueraColors.danger,
+                                      ),
+                                    )
+                                  : const Text('Quit'),
+                            ),
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: ConqueraSpace.md),
+                            Text(
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: ConqueraText.label
+                                  .copyWith(color: ConqueraColors.danger),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (_error != null) ...[
-                      const SizedBox(height: ConqueraSpace.md),
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: ConqueraText.label
-                            .copyWith(color: const Color(0xFFFFB4B4)),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
+      ),
     );
   }
 
   /// "Your last territory, X, was taken by" + the invader. Falls back to a
   /// plain line when the attack can't be found.
-  Widget _who(
-    UpdateEntry? invasion,
-    PlayerState? invader,
-    Color soft,
-    Color white,
-  ) {
+  Widget _who(UpdateEntry? invasion, PlayerState? invader) {
+    final text = ConqueraText.value.copyWith(
+      color: ConqueraColors.muted,
+      fontSize: 14.5,
+      height: 1.4,
+    );
     if (invasion == null) {
       return Text(
         'You have no territories left.',
         textAlign: TextAlign.center,
-        style: ConqueraText.value.copyWith(color: soft, fontSize: 15),
+        style: text,
       );
     }
     return Column(
@@ -284,18 +388,14 @@ class _DeathOverlayState extends State<DeathOverlay> {
           'Your last territory, ${widget.provinceName(invasion.targetId)}, '
           'was taken by',
           textAlign: TextAlign.center,
-          style: ConqueraText.value.copyWith(
-            color: soft,
-            fontSize: 15,
-            height: 1.4,
-          ),
+          style: text,
         ),
         const SizedBox(height: ConqueraSpace.sm),
         PlayerTag(
           name: invader?.displayName ?? 'another player',
           color: invader?.color,
           square: true,
-          style: ConqueraText.name.copyWith(color: white, fontSize: 20),
+          style: ConqueraText.name.copyWith(fontSize: 20),
         ),
       ],
     );

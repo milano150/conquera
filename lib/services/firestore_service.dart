@@ -1208,6 +1208,25 @@ class FirestoreService {
     throw const GameActionException('There is no free country to respawn in.');
   }
 
+  /// Removes a player who lost every territory from the world for good by
+  /// deleting their player document. They can join again later as a new
+  /// player.
+  ///
+  /// Throws [GameActionException] if the player still owns a territory.
+  Future<void> quitWorld({
+    required String gameId,
+    required String uid,
+  }) async {
+    final stillOwns = await _provincesRef(gameId)
+        .where('ownerId', isEqualTo: uid)
+        .limit(1)
+        .get();
+    if (stillOwns.docs.isNotEmpty) {
+      throw const GameActionException('You still own a territory.');
+    }
+    await _playerRef(gameId, uid).delete();
+  }
+
   /// Adds a new player to an existing world: creates their document with
   /// [GameRules.startingGold] and gives them a random free country from
   /// [spawnCandidates] (province ids) as their starting territory. Returns
