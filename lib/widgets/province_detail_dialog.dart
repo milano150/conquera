@@ -57,7 +57,7 @@ class ProvinceDetailDialog extends StatefulWidget {
 class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   Timer? _ticker;
 
-  /// Building picked in the dropdown but not built yet (null = none picked).
+  /// Building picked in the picker but not built yet (null = none picked).
   /// Once the province actually has a building, that one is shown instead.
   BuildingDef? _pendingBuilding;
 
@@ -124,6 +124,20 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Opens the building picker and previews whatever is chosen.
+  Future<void> _pickBuilding(double gold) async {
+    final picked = await showDialog<BuildingDef>(
+      context: context,
+      builder: (_) => _BuildingPicker(
+        provinceId: widget.provinceId,
+        neighbors: widget.neighborIds.length,
+        gold: gold,
+        selected: _pendingBuilding,
+      ),
+    );
+    if (picked != null && mounted) setState(() => _pendingBuilding = picked);
   }
 
   Future<void> _build() {
@@ -334,7 +348,8 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
 
   /// Build section. Two states:
   ///  * province has a building: it is shown solid with a Destroy button;
-  ///  * otherwise: a dropdown. Picking an entry only previews it (dashed
+  ///  * otherwise: a field that opens the building picker (buildings in
+  ///    sections, three per row). Picking one only previews it (dashed
   ///    border, faded icon) until the Build button is pressed.
   List<Widget> _buildSection({
     required ProvinceState? province,
@@ -398,26 +413,16 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Dropdown<BuildingDef>(
-                  value: pending,
+                _PickerField(
                   hint: 'Select building',
-                  // Only what this territory is allowed to build.
-                  items: GameRules.buildingsFor(
-                    widget.provinceId,
-                    neighbors: widget.neighborIds.length,
-                  ),
-                  name: (b) => b.name,
-                  price: (b) => b.cost,
-                  isEnabled: (b) => gold >= b.cost,
-                  onChanged: _busy
-                      ? null
-                      : (b) => setState(() => _pendingBuilding = b),
+                  label: pending?.name,
+                  price: pending?.cost,
+                  onTap: _busy ? null : () => _pickBuilding(gold),
                 ),
                 const SizedBox(height: ConqueraSpace.sm),
                 _ActionRow(
-                  price: pending?.cost,
                   info: pending == null
-                      ? (cooling ? 'Cooling down after destroying a building' : '')
+                      ? (cooling ? 'Cooling down' : '')
                       : pending.effectLabelFor(partners),
                   unaffordable: unaffordable,
                   button: FilledButton(
@@ -646,7 +651,7 @@ class _ActionRow extends StatelessWidget {
     }
     if (unaffordable) {
       separator();
-      spans.add(const TextSpan(text: 'not enough gold'));
+      spans.add(const TextSpan(text: 'Not enough gold'));
     }
 
     return Row(
@@ -763,6 +768,355 @@ class _Dropdown<T> extends StatelessWidget {
                 color: ConqueraColors.muted.withAlpha(110),
               ),
         faded: !enabled,
+      ),
+    );
+  }
+}
+
+/// Same look as the dropdown it replaced, but tapping it opens the building
+/// picker. Shows [hint] until something is chosen, then "name  ·  price".
+class _PickerField extends StatelessWidget {
+  final String hint;
+  final String? label;
+  final int? price;
+  final VoidCallback? onTap;
+
+  const _PickerField({
+    required this.hint,
+    required this.label,
+    required this.price,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final chosen = label != null;
+    return Material(
+      color: Colors.white.withAlpha(onTap == null ? 70 : 170),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: const BorderSide(color: ConqueraColors.divider),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: chosen
+                    ? Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '$label  ·  ',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: ConqueraText.value,
+                            ),
+                          ),
+                          if (price != null)
+                            GoldAmount(price!, style: ConqueraText.value),
+                        ],
+                      )
+                    : Text(
+                        hint,
+                        style: ConqueraText.value
+                            .copyWith(color: ConqueraColors.muted),
+                      ),
+              ),
+              const Icon(Icons.expand_more, color: ConqueraColors.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _Category {
+  production('Production'),
+  surveillance('Surveillance'),
+  defense('Defense'),
+  military('Military');
+
+  final String label;
+  const _Category(this.label);
+}
+
+_Category _categoryOf(BuildingDef b) => switch (b.id) {
+      'watchtower' || 'radar' => _Category.surveillance,
+      'fortress' || 'wall' => _Category.defense,
+      'barracks' => _Category.military,
+      _ => _Category.production,
+    };
+
+/// The "Select building" window: every building in sections, three per row.
+/// Buildings the player can't afford are faded; ones this territory can't
+/// hold are faded with the reason. Tapping an available one picks it and
+/// closes the window.
+class _BuildingPicker extends StatelessWidget {
+  final String provinceId;
+  final int neighbors;
+  final double gold;
+  final BuildingDef? selected;
+
+  const _BuildingPicker({
+    required this.provinceId,
+    required this.neighbors,
+    required this.gold,
+    required this.selected,
+  });
+
+  /// Buildings this territory can't hold are not shown at all.
+  bool _available(BuildingDef b) =>
+      GameRules.canBuildHere(b, provinceId, neighbors: neighbors);
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: ConqueraColors.surface,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(ConqueraSpace.md),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: ConqueraColors.divider),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('Select building', style: ConqueraText.title),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Close',
+                    icon: const Icon(Icons.close, size: 20),
+                    color: ConqueraColors.muted,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              for (final category in _Category.values)
+                ..._section(context, category),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _section(BuildContext context, _Category category) {
+    final items = [
+      for (final b in GameRules.buildings)
+        if (_categoryOf(b) == category && _available(b)) b,
+    ];
+    if (items.isEmpty) return const [];
+    return [
+      const SizedBox(height: ConqueraSpace.md),
+      const Divider(height: 1, color: ConqueraColors.divider),
+      const SizedBox(height: ConqueraSpace.md),
+      _SectionTitle(category.label),
+      const SizedBox(height: ConqueraSpace.sm),
+      GridView.count(
+        crossAxisCount: 3,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: ConqueraSpace.sm,
+        crossAxisSpacing: ConqueraSpace.sm,
+        childAspectRatio: 0.95,
+        children: [
+          for (final b in items)
+            _BuildingTile(
+              building: b,
+              selected: selected?.id == b.id,
+              affordable: gold >= b.cost,
+              onTap: () => Navigator.of(context).pop(b),
+              onInfo: () => showDialog<void>(
+                context: context,
+                builder: (_) => _BuildingInfoDialog(building: b),
+              ),
+            ),
+        ],
+      ),
+    ];
+  }
+}
+
+class _BuildingTile extends StatelessWidget {
+  final BuildingDef building;
+  final bool selected;
+  final bool affordable;
+  final VoidCallback onTap;
+  final VoidCallback onInfo;
+
+  const _BuildingTile({
+    required this.building,
+    required this.selected,
+    required this.affordable,
+    required this.onTap,
+    required this.onInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = affordable;
+    return Stack(
+      children: [
+        Positioned.fill(child: _tile(enabled)),
+        Positioned(
+          top: 6,
+          left: 6,
+          child: GestureDetector(
+            onTap: onInfo,
+            behavior: HitTestBehavior.opaque,
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(
+                Icons.info_outline,
+                size: 14,
+                color: ConqueraColors.muted,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tile(bool enabled) {
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: Material(
+        color: Colors.white.withAlpha(170),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(
+            color: selected ? ConqueraColors.accent : ConqueraColors.divider,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          child: Padding(
+            padding: const EdgeInsets.all(ConqueraSpace.sm),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(building.icon, size: 30, color: Colors.black),
+                const SizedBox(height: 6),
+                Text(
+                  building.name,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConqueraText.value.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                GoldAmount(
+                  building.cost,
+                  style: ConqueraText.label.copyWith(
+                    color: affordable
+                        ? ConqueraColors.muted
+                        : ConqueraColors.danger,
+                  ),
+                  iconSize: 12,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Detail box opened by a tile's info icon.
+class _BuildingInfoDialog extends StatelessWidget {
+  final BuildingDef building;
+
+  const _BuildingInfoDialog({required this.building});
+
+  String get _where => switch (building.site) {
+        BuildSite.coastal => 'Coastal territories',
+        BuildSite.archipelago => 'Island territories',
+        BuildSite.anywhere =>
+          building.tradesWithNeighbors ? 'Needs a neighbor' : 'Anywhere',
+      };
+
+  Widget _row(String label, Widget value) => Padding(
+        padding: const EdgeInsets.only(top: ConqueraSpace.sm),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 70,
+              child: Text(label, style: ConqueraText.label),
+            ),
+            Expanded(child: value),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: ConqueraColors.surface,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(ConqueraSpace.md),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: ConqueraColors.divider),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Padding(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(building.icon, size: 26, color: Colors.black),
+                  const SizedBox(width: ConqueraSpace.sm),
+                  Expanded(
+                    child: Text(building.name, style: ConqueraText.title),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Close',
+                    icon: const Icon(Icons.close, size: 20),
+                    color: ConqueraColors.muted,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              const SizedBox(height: ConqueraSpace.sm),
+              Text(building.details, style: ConqueraText.value),
+              const SizedBox(height: ConqueraSpace.sm),
+              const Divider(height: 1, color: ConqueraColors.divider),
+              _row('Cost', GoldAmount(building.cost, style: ConqueraText.value)),
+              _row(
+                'Effect',
+                Text(building.effectLabelFor(0), style: ConqueraText.value),
+              ),
+              _row('Where', Text(_where, style: ConqueraText.value)),
+            ],
+          ),
+        ),
       ),
     );
   }

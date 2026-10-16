@@ -57,8 +57,9 @@ class HowToPlayScreen extends StatelessWidget {
           '(coast only), offshore rigs (island archipelagos only) and '
           'markets make gold, and a market earns more for every bordering '
           'territory you also own. Barracks lend their power to attacks '
-          'launched from bordering territories of yours, and a radar shows '
-          'the buildings and power of the territories around it. If you '
+          'launched from bordering territories of yours, a watchtower shows '
+          'the buildings and power of bordering territories, and a radar '
+          'shows everything inside its range. If you '
           'destroy a building, you cannot build anything for '
           '${GameRules.buildCooldownAfterDestroy.inMinutes} minutes.',
     ),
@@ -70,7 +71,7 @@ class HowToPlayScreen extends StatelessWidget {
     ),
     (
       'The war log',
-      'Open Updates in the menu to see every war you started or faced and '
+      'Open History in the menu to see every war you started or faced and '
           'every building you built or destroyed, newest at the bottom.',
     ),
   ];

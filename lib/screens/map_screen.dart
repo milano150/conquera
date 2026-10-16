@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config/dev_session.dart';
 import '../config/saved_world.dart';
 import '../config/game_rules.dart';
 import '../services/server_clock.dart';
@@ -18,6 +18,7 @@ import '../painters/map_painter.dart';
 import '../screens/how_to_play_screen.dart';
 import '../services/spawn_candidates.dart';
 import '../widgets/death_overlay.dart';
+import '../screens/log_screen.dart';
 import '../screens/updates_screen.dart';
 import '../services/firestore_service.dart';
 import '../state/map_controller.dart';
@@ -118,7 +119,7 @@ class _MapScreenState extends State<MapScreen>
   // Live game data. Notifiers (instead of plain fields) so the province
   // window can listen to the same data without opening its own streams.
   final FirestoreService _firestore = FirestoreService();
-  late final String _uid = FirebaseAuth.instance.currentUser!.uid;
+  late final String _uid = DevSession.uid;
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
@@ -205,6 +206,14 @@ class _MapScreenState extends State<MapScreen>
   /// The sweep (win) or shake (loss), 0..1.
   late final AnimationController _fx = AnimationController(vsync: this);
 
+  /// Dims the map outside the selected radar's range, 0..1.
+  late final AnimationController _radarCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  );
+  List<(Offset, double)> _radarCircles = const [];
+  bool _radarOn = false;
+
   /// The pop-up text, 0..1.
   late final AnimationController _popupAnim = AnimationController(
     vsync: this,
@@ -213,6 +222,11 @@ class _MapScreenState extends State<MapScreen>
   _Popup? _popup;
 
   bool get _battleRunning => _battle != null;
+
+  /// True while another player's attack on this player is queued or playing;
+  /// drives the red alert at the bottom of the screen.
+  bool _underAttack = false;
+  String _alertDetail = '';
 
   // --- Camera pan toward the war zone -----------------------------------
   /// Last viewport size, remembered so the camera can be moved from code.
@@ -276,6 +290,7 @@ class _MapScreenState extends State<MapScreen>
     _popupAnim.dispose();
     _cam.dispose();
     _revealCtl.dispose();
+    _radarCtl.dispose();
     super.dispose();
   }
 
@@ -461,9 +476,25 @@ class _MapScreenState extends State<MapScreen>
     return colors;
   }
 
-  /// Fog of war: you see your own provinces, plus every province that
-  /// borders one of your radars.
-  bool _canSee(String id) {
+  /// Centre (icon position) and radius, in map units, of each of the
+  /// player's radars.
+  List<(Offset, double)> _myRadars() {
+    final width = _controller.mapSize.width;
+    final out = <(Offset, double)>[];
+    _provinceStates.value.forEach((id, s) {
+      if (s.ownerId != _uid) return;
+      final fraction = GameRules.revealRadiusOf(s.buildingType);
+      if (fraction <= 0) return;
+      final province = _controller.provinceById(id);
+      if (province != null) out.add((province.anchor, fraction * width));
+    });
+    return out;
+  }
+
+  /// Fog of war: you see your own provinces, every province that borders
+  /// one of your watchtowers, and every province whose icon lies inside one
+  /// of your radars' range.
+  bool _canSee(String id, [List<(Offset, double)>? radars]) {
     final states = _provinceStates.value;
     final s = states[id];
     if (s == null) return false;
@@ -476,13 +507,43 @@ class _MapScreenState extends State<MapScreen>
         return true;
       }
     }
+    final province = _controller.provinceById(id);
+    if (province == null) return false;
+    final width = _controller.mapSize.width;
+    for (final (center, radius) in radars ?? _myRadars()) {
+      var dx = (province.anchor.dx - center.dx).abs();
+      if (width > 0) dx = min(dx, width - dx);
+      final dy = province.anchor.dy - center.dy;
+      if (dx * dx + dy * dy <= radius * radius) return true;
+    }
     return false;
+  }
+
+  /// Keeps the radar dimming in step with the selection: on while the
+  /// player's own radar is selected, fading out otherwise.
+  void _syncRadar(Province? selected, ProvinceState? state) {
+    final fraction =
+        (selected != null && state != null && state.ownerId == _uid)
+            ? GameRules.revealRadiusOf(state.buildingType)
+            : 0.0;
+    final on = fraction > 0;
+    if (on) {
+      // Show the range of every radar the player owns, not just this one.
+      _radarCircles = _myRadars();
+    }
+    if (on == _radarOn) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || on == _radarOn) return;
+      _radarOn = on;
+      on ? _radarCtl.forward() : _radarCtl.reverse();
+    });
   }
 
   /// What to draw on top of each province: its building's icon and its
   /// power. Provinces with neither get no badge.
   List<MapBadge> _badges() {
     final badges = <MapBadge>[];
+    final radars = _myRadars();
     _provinceStates.value.forEach((id, state) {
       final province = _controller.provinceById(id);
       if (province == null) return;
@@ -504,7 +565,7 @@ class _MapScreenState extends State<MapScreen>
 
       // Fog of war: only provinces you own or see with a radar show a
       // building and power.
-      if (!_canSee(id)) return;
+      if (!_canSee(id, radars)) return;
       final icon = state.hasBuilding
           ? GameRules.buildingById(state.buildingType)?.icon
           : null;
@@ -1023,8 +1084,20 @@ class _MapScreenState extends State<MapScreen>
     if (e.attackerId == _uid) return; // the attacker plays their own fight
     final at = e.at;
     if (at != null && ServerClock.now().difference(at).inSeconds > 20) return;
+    if (e.defenderId == _uid) _raiseAttackAlert(e);
     _eventQueue.add(e);
     _drainEvents();
+  }
+
+  void _raiseAttackAlert(BattleEvent e) {
+    final target = _controller.provinceById(e.targetId);
+    final attacker = _players.value[e.attackerId]?.displayName ?? 'A player';
+    setState(() {
+      _underAttack = true;
+      _alertDetail = target == null
+          ? '$attacker is attacking you'
+          : '$attacker is invading ${target.name}';
+    });
   }
 
   /// Plays queued battles one after another, waiting for this player's own
@@ -1060,6 +1133,8 @@ class _MapScreenState extends State<MapScreen>
     final players = _players.value;
     final attacker = players[e.attackerId];
     final defender = e.defenderId == null ? null : players[e.defenderId];
+    // An attack on this player: highlight the borders and fly to the war zone.
+    final onMe = e.defenderId == _uid;
     final attackerColor = attacker?.color ?? ConqueraColors.accent;
     final defenderColor = defender?.color ?? ConqueraColors.muted;
 
@@ -1080,11 +1155,11 @@ class _MapScreenState extends State<MapScreen>
         attackerColor: attackerColor,
         defenderColor: defenderColor,
         outcome: BattleOutcome.pending,
-        showOutlines: false,
+        showOutlines: onMe,
       );
     });
 
-    if (_cameraFollowsBattles) await _panToTarget(target);
+    if (onMe || _cameraFollowsBattles) await _panToTarget(target);
     await Future<void>.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
 
@@ -1097,7 +1172,7 @@ class _MapScreenState extends State<MapScreen>
           attackerColor: attackerColor,
           defenderColor: defenderColor,
           outcome: BattleOutcome.won,
-          showOutlines: false,
+          showOutlines: onMe,
         );
       });
       _fx.duration = const Duration(milliseconds: 1100);
@@ -1122,7 +1197,7 @@ class _MapScreenState extends State<MapScreen>
           attackerColor: attackerColor,
           defenderColor: defenderColor,
           outcome: BattleOutcome.lost,
-          showOutlines: false,
+          showOutlines: onMe,
         );
       });
       _fx.duration = const Duration(milliseconds: 825);
@@ -1142,11 +1217,86 @@ class _MapScreenState extends State<MapScreen>
     _endBattle();
   }
 
+  /// Small red "you are being attacked" banner at the bottom of the screen.
+  Widget _attackAlert() {
+    return Positioned(
+      left: ConqueraSpace.md,
+      right: ConqueraSpace.md,
+      bottom: ConqueraSpace.md + MediaQuery.of(context).padding.bottom,
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
+          opacity: _underAttack ? 1 : 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: ConqueraSpace.md,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: ConqueraColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: ConqueraColors.danger, width: 1.5),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x2212324A),
+                    blurRadius: 10,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: ConqueraColors.danger,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.priority_high,
+                      color: ConqueraColors.danger,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'You are being attacked',
+                          style: ConqueraText.name.copyWith(
+                            fontSize: 16,
+                            color: ConqueraColors.danger,
+                          ),
+                        ),
+                        Text(_alertDetail, style: ConqueraText.label),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _endBattle() {
     _pulse.stop();
     _fx.value = 0;
     setState(() {
       _battle = null;
+      _underAttack = _eventQueue.any((q) => q.defenderId == _uid);
       _colorOverrides = const {};
       _frozenTroops = const {};
       _hiddenIds = const {};
@@ -1261,8 +1411,19 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  /// Opens the war log (attacks you did or faced, buildings built and
-  /// destroyed).
+  Map<String, String> _namesCache = const {};
+
+  /// province id -> country name, rebuilt only when the map has (re)loaded.
+  Map<String, String> get _provinceNames {
+    final all = _controller.provinces;
+    if (_namesCache.length != all.length) {
+      _namesCache = {for (final p in all) p.id: p.name};
+    }
+    return _namesCache;
+  }
+
+  /// Opens the full History screen (attacks you did or faced, buildings
+  /// built and destroyed).
   void _openUpdates() {
     setState(() => _sidebarOpen = false);
     Navigator.of(context).push(
@@ -1288,6 +1449,41 @@ class _MapScreenState extends State<MapScreen>
         pageBuilder: (_, __, ___) => UpdatesScreen(
           gameId: widget.gameId,
           uid: _uid,
+          firestore: _firestore,
+          provinceNames: {
+            for (final p in _controller.provinces) p.id: p.name,
+          },
+          players: _players,
+        ),
+      ),
+    );
+  }
+
+  /// Opens the world Log (joins, annexations, battles, eliminations).
+  void _openLog() {
+    setState(() => _sidebarOpen = false);
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 320),
+        reverseTransitionDuration: const Duration(milliseconds: 260),
+        // Swipes in from the left edge, to the right, like the menu it
+        // came from.
+        transitionsBuilder: (context, animation, secondary, child) =>
+            SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(-1, 0),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+              reverseCurve: Curves.easeInCubic,
+            ),
+          ),
+          child: child,
+        ),
+        pageBuilder: (_, __, ___) => LogScreen(
+          gameId: widget.gameId,
           firestore: _firestore,
           provinceNames: {
             for (final p in _controller.provinces) p.id: p.name,
@@ -1343,6 +1539,7 @@ class _MapScreenState extends State<MapScreen>
                 final selectedState =
                     selected == null ? null : _provinceStates.value[selected.id];
                 final selectedOwner = _players.value[selectedState?.ownerId];
+                _syncRadar(selected, selectedState);
 
                 // Another player's province gets an Attack button; it only works
                 // if one of the player's own provinces borders it.
@@ -1447,6 +1644,22 @@ class _MapScreenState extends State<MapScreen>
                                     IgnorePointer(
                                       child: RepaintBoundary(
                                         child: AnimatedBuilder(
+                                          animation: _radarCtl,
+                                          builder: (context, _) => CustomPaint(
+                                            size: sceneSize,
+                                            painter: RadarPainter(
+                                              circles: _radarCircles,
+                                              progress: Curves.easeInOut
+                                                  .transform(_radarCtl.value),
+                                              wrapWidth: mapSize.width,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    IgnorePointer(
+                                      child: RepaintBoundary(
+                                        child: AnimatedBuilder(
                                           animation: _transform,
                                           builder: (context, _) => CustomPaint(
                                             size: sceneSize,
@@ -1477,6 +1690,7 @@ class _MapScreenState extends State<MapScreen>
                           ),
                         ),
                       ),
+                    _attackAlert(),
                     Positioned(
                       top: 0,
                       left: 0,
@@ -1524,7 +1738,10 @@ class _MapScreenState extends State<MapScreen>
             players: _players,
             provinces: _provinceStates,
             myUid: _uid,
+            firestore: _firestore,
+            provinceNames: _provinceNames,
             onOpenUpdates: _openUpdates,
+            onOpenLog: _openLog,
             onOpenHowToPlay: _openHowToPlay,
           ),
           Positioned.fill(

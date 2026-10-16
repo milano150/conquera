@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 
 import '../models/player_state.dart';
 import '../models/province_state.dart';
+import '../services/firestore_service.dart';
 import '../config/saved_world.dart';
 import '../theme/conquera_theme.dart';
+import 'feed_panels.dart';
 import 'leaderboard_panel.dart';
 
 /// Slide-in menu that covers the left of the screen while the rest of the
@@ -30,8 +32,17 @@ class WorldSidebar extends StatefulWidget {
   /// The current player, highlighted in the leaderboard.
   final String? myUid;
 
-  /// Opens the Updates (war log) screen.
+  /// For the History and Log previews.
+  final FirestoreService firestore;
+
+  /// province id -> country name.
+  final Map<String, String> provinceNames;
+
+  /// Opens the full History screen (the expand button of its preview).
   final VoidCallback onOpenUpdates;
+
+  /// Opens the full Log screen (the expand button of its preview).
+  final VoidCallback onOpenLog;
 
   /// Opens the How to play screen.
   final VoidCallback onOpenHowToPlay;
@@ -44,7 +55,10 @@ class WorldSidebar extends StatefulWidget {
     required this.players,
     required this.provinces,
     this.myUid,
+    required this.firestore,
+    required this.provinceNames,
     required this.onOpenUpdates,
+    required this.onOpenLog,
     required this.onOpenHowToPlay,
   });
 
@@ -127,7 +141,10 @@ class _WorldSidebarState extends State<WorldSidebar>
                   players: widget.players,
                   provinces: widget.provinces,
                   myUid: widget.myUid,
+                  firestore: widget.firestore,
+                  provinceNames: widget.provinceNames,
                   onOpenUpdates: widget.onOpenUpdates,
+                  onOpenLog: widget.onOpenLog,
                   onOpenHowToPlay: widget.onOpenHowToPlay,
                 ),
               ),
@@ -144,7 +161,10 @@ class _Panel extends StatefulWidget {
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
   final String? myUid;
+  final FirestoreService firestore;
+  final Map<String, String> provinceNames;
   final VoidCallback onOpenUpdates;
+  final VoidCallback onOpenLog;
   final VoidCallback onOpenHowToPlay;
 
   const _Panel({
@@ -152,7 +172,10 @@ class _Panel extends StatefulWidget {
     required this.players,
     required this.provinces,
     required this.myUid,
+    required this.firestore,
+    required this.provinceNames,
     required this.onOpenUpdates,
+    required this.onOpenLog,
     required this.onOpenHowToPlay,
   });
 
@@ -160,8 +183,10 @@ class _Panel extends StatefulWidget {
   State<_Panel> createState() => _PanelState();
 }
 
+enum _View { menu, leaderboard, history, log }
+
 class _PanelState extends State<_Panel> {
-  bool _showLeaderboard = false;
+  _View _view = _View.menu;
 
   @override
   Widget build(BuildContext context) {
@@ -172,17 +197,44 @@ class _PanelState extends State<_Panel> {
           border: Border(right: BorderSide(color: ConqueraColors.divider)),
         ),
         child: SafeArea(
-          child: _showLeaderboard
-              ? LeaderboardPanel(
-                  players: widget.players,
-                  provinces: widget.provinces,
-                  myUid: widget.myUid,
-                  onBack: () => setState(() => _showLeaderboard = false),
-                )
-              : _menu(context),
+          child: _content(context),
         ),
       ),
     );
+  }
+
+  Widget _content(BuildContext context) {
+    void toMenu() => setState(() => _view = _View.menu);
+    switch (_view) {
+      case _View.leaderboard:
+        return LeaderboardPanel(
+          players: widget.players,
+          provinces: widget.provinces,
+          myUid: widget.myUid,
+          onBack: toMenu,
+        );
+      case _View.history:
+        return HistoryPanel(
+          gameId: widget.worldId,
+          uid: widget.myUid,
+          firestore: widget.firestore,
+          provinceNames: widget.provinceNames,
+          players: widget.players,
+          onBack: toMenu,
+          onExpand: widget.onOpenUpdates,
+        );
+      case _View.log:
+        return LogPanel(
+          gameId: widget.worldId,
+          firestore: widget.firestore,
+          provinceNames: widget.provinceNames,
+          players: widget.players,
+          onBack: toMenu,
+          onExpand: widget.onOpenLog,
+        );
+      case _View.menu:
+        return _menu(context);
+    }
   }
 
   Widget _menu(BuildContext context) {
@@ -214,9 +266,13 @@ class _PanelState extends State<_Panel> {
         const Divider(height: 1, color: ConqueraColors.divider),
         _Item(
           label: 'Leaderboard',
-          onTap: () => setState(() => _showLeaderboard = true),
+          onTap: () => setState(() => _view = _View.leaderboard),
         ),
-        _Item(label: 'Updates', onTap: widget.onOpenUpdates),
+        _Item(
+          label: 'History',
+          onTap: () => setState(() => _view = _View.history),
+        ),
+        _Item(label: 'Log', onTap: () => setState(() => _view = _View.log)),
         _Item(label: 'How to play', onTap: widget.onOpenHowToPlay),
         // Nothing behind this yet.
         _Item(label: 'Settings', onTap: () {}),

@@ -9,7 +9,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 class DevSession {
   const DevSession._();
 
-  static String? _override;
+  /// Always act as this player, whatever account this device signed in with.
+  /// Set to null to use the device's own account again.
+  static const String? _forcedUid = '4mNz3e8fIjRlta6o7mmVmvyUqef1';
+
+  static String? _override = _forcedUid;
 
   /// The uid the app is acting as.
   static String get uid =>
@@ -21,5 +25,5 @@ class DevSession {
   static void actAs(String uid) => _override = uid;
 
   /// Go back to this device's own anonymous account.
-  static void reset() => _override = null;
+  static void reset() => _override = _forcedUid;
 }

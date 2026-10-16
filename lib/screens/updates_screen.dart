@@ -10,7 +10,7 @@ import '../models/update_entry.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
 
-/// The player's war log, laid out like a chat: oldest at the top, newest at
+/// The player's History (war log), laid out like a chat: oldest at the top, newest at
 /// the bottom, new entries appearing below as they happen.
 ///
 ///  * A war shows as "War of {territory}": red when it was an attack on
@@ -119,7 +119,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                     icon: const Icon(Icons.arrow_back, size: 20),
                     color: ConqueraColors.ink,
                   ),
-                  Text('Updates', style: ConqueraText.title.copyWith(fontSize: 22)),
+                  Text('History', style: ConqueraText.title.copyWith(fontSize: 22)),
                 ],
               ),
             ),

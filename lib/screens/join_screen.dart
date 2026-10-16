@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../config/dev_session.dart';
 import '../config/player_colors.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
@@ -104,7 +104,7 @@ class _JoinScreenState extends State<JoinScreen> {
     });
 
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final uid = DevSession.uid;
       final map = await SvgMapParser.parseAsset(MapScreen.defaultAssetPath);
 
       final spawn = await _service.joinWorld(

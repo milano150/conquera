@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../config/game_rules.dart';
 import '../models/battle_event.dart';
+import '../models/log_entry.dart';
 import '../models/attack_result.dart';
 import '../models/player_state.dart';
 import '../models/province_state.dart';
@@ -78,10 +79,46 @@ class FirestoreService {
         .expand(
           (snap) => [
             for (final c in snap.docChanges)
-              if (c.type == DocumentChangeType.added)
+              // The Log shares this collection: only attacks are replayed.
+              if (c.type == DocumentChangeType.added &&
+                  (c.doc.data()?['type'] ?? 'attack') == 'attack')
                 BattleEvent.fromDoc(c.doc),
           ],
         );
+  }
+
+  /// The world Log: the latest [limit] public events (annexations, attacks,
+  /// joins, eliminations, respawns), oldest first, so the newest is last.
+  Stream<List<LogEntry>> watchLog({
+    required String gameId,
+    int limit = 150,
+  }) {
+    return _gameRef(gameId)
+        .collection('events')
+        .orderBy('at', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((snap) {
+      final list = [for (final doc in snap.docs.reversed) LogEntry.fromDoc(doc)];
+      // An attack and the elimination it caused share a timestamp: keep the
+      // attack first. Dart's sort isn't stable, so break ties by hand.
+      int rank(LogEntry e) => e.type == LogType.eliminated ? 1 : 0;
+      final order = {for (var i = 0; i < list.length; i++) list[i].id: i};
+      list.sort((a, b) {
+        final at = a.at, bt = b.at;
+        final c = at == null && bt == null
+            ? 0
+            : at == null
+                ? 1
+                : bt == null
+                    ? -1
+                    : at.compareTo(bt);
+        if (c != 0) return c;
+        final r = rank(a).compareTo(rank(b));
+        return r != 0 ? r : order[a.id]!.compareTo(order[b.id]!);
+      });
+      return list;
+    });
   }
 
   /// A player's personal feed (attacks they did or faced, buildings they
@@ -205,6 +242,28 @@ class FirestoreService {
   String _buildingTypeOf(Map<String, dynamic>? provinceData) {
     final building = provinceData?['building'];
     return building is Map ? (building['type'] as String? ?? 'none') : 'none';
+  }
+
+  String _nameOf(DocumentSnapshot<Map<String, dynamic>>? snap) =>
+      (snap?.data()?['displayName'] as String?) ?? 'Player';
+
+  String _colorOf(DocumentSnapshot<Map<String, dynamic>>? snap) =>
+      (snap?.data()?['colorHex'] as String?) ?? '#457B9D';
+
+  /// Adds a line to the world Log (games/{gameId}/events) inside [tx].
+  /// [data] needs actorId / actorName / actorColor, plus whatever the type
+  /// uses (targetId, victimId, ...).
+  void _logEvent(
+    Transaction tx,
+    String gameId,
+    String type,
+    Map<String, dynamic> data,
+  ) {
+    tx.set(_gameRef(gameId).collection('events').doc(), {
+      'type': type,
+      ...data,
+      'at': FieldValue.serverTimestamp(),
+    });
   }
 
   /// The fields to write when a player's income changes: gold is settled
@@ -852,6 +911,10 @@ class FirestoreService {
       final r = result;
       if (r != null) {
         tx.set(_gameRef(gameId).collection('events').doc(), {
+          'type': 'attack',
+          'actorId': uid,
+          'actorName': _nameOf(attackerSnap),
+          'actorColor': _colorOf(attackerSnap),
           'attackerId': uid,
           'defenderId': defenderId,
           'targetId': targetId,
@@ -860,6 +923,22 @@ class FirestoreService {
           'defenderSupportIds': r.defenderSupportIds,
           'at': FieldValue.serverTimestamp(),
         });
+
+        // Losing the last territory removes the defender from the map.
+        if (r.won &&
+            defenderSnap != null &&
+            defenderSnap.exists &&
+            _ownedCount(defenderSnap) - 1 <= 0) {
+          _logEvent(tx, gameId, 'eliminated', {
+            'actorId': uid,
+            'actorName': _nameOf(attackerSnap),
+            'actorColor': _colorOf(attackerSnap),
+            'victimId': defenderId,
+            'victimName': _nameOf(defenderSnap),
+            'victimColor': _colorOf(defenderSnap),
+            'targetId': targetId,
+          });
+        }
 
         // The same report goes into both players' personal Updates feed.
         final report = {
@@ -1020,6 +1099,12 @@ class FirestoreService {
           now: now,
           spend: cost.toDouble(),
         ),
+      });
+      _logEvent(tx, gameId, 'annex', {
+        'actorId': uid,
+        'actorName': _nameOf(playerSnap),
+        'actorColor': _colorOf(playerSnap),
+        'targetId': provinceId,
       });
       return null;
     });
@@ -1189,6 +1274,12 @@ class FirestoreService {
           'troopsUpdatedAt': FieldValue.serverTimestamp(),
           'building': {'type': 'none', 'level': 0},
         });
+        _logEvent(tx, gameId, 'respawn', {
+          'actorId': uid,
+          'actorName': _nameOf(playerSnap),
+          'actorColor': _colorOf(playerSnap),
+          'targetId': provinceId,
+        });
         tx.update(playerRef, {
           'gold': GameRules.startingGold.toDouble(),
           'goldUpdatedAt': FieldValue.serverTimestamp(),
@@ -1269,6 +1360,11 @@ class FirestoreService {
           'troops': GameRules.startingTroops,
           'troopsUpdatedAt': FieldValue.serverTimestamp(),
           'building': {'type': 'none', 'level': 0},
+        });
+        _logEvent(tx, gameId, 'join', {
+          'actorId': uid,
+          'actorName': displayName,
+          'actorColor': colorHex,
         });
         tx.set(playerRef, {
           'displayName': displayName,

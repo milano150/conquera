@@ -603,3 +603,54 @@ class BadgePainter extends CustomPainter {
         !identical(oldDelegate.transform, transform);
   }
 }
+
+/// Darkens everything outside the radars' ranges. Nothing is drawn at
+/// [progress] 0; at 1 the whole map is dimmed except a sharp-edged circle for
+/// each entry of [circles] (centre, radius). The circles are cut out of the
+/// dim layer for every copy of the world, so they wrap around the map edge.
+class RadarPainter extends CustomPainter {
+  final List<(Offset, double)> circles;
+
+  /// 0..1, already eased.
+  final double progress;
+  final double wrapWidth;
+
+  static const int _dimAlpha = 140;
+
+  RadarPainter({
+    required this.circles,
+    required this.progress,
+    this.wrapWidth = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (circles.isEmpty || progress <= 0) return;
+
+    // The circles open up while the map dims.
+    final grow = 1 + (1 - progress) * 0.6;
+    canvas.saveLayer(Offset.zero & size, Paint());
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = Colors.black.withAlpha((_dimAlpha * progress).round()),
+    );
+    final offsets = wrapWidth > 0 ? [0.0, wrapWidth, wrapWidth * 2] : [0.0];
+    final hole = Paint()
+      ..blendMode = BlendMode.dstOut
+      ..isAntiAlias = true
+      ..color = Colors.black;
+    for (final (c, radius) in circles) {
+      if (radius <= 0) continue;
+      for (final dx in offsets) {
+        canvas.drawCircle(Offset(c.dx + dx, c.dy), radius * grow, hole);
+      }
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant RadarPainter old) =>
+      !listEquals(old.circles, circles) ||
+      old.progress != progress ||
+      old.wrapWidth != wrapWidth;
+}

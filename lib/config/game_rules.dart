@@ -55,11 +55,19 @@ class BuildingDef {
   final String? effect;
 
   /// The owner can see the buildings and power of every territory that
-  /// borders this one (a radar). Sea links count as borders.
+  /// borders this one (a watchtower). Sea links count as borders.
   final bool revealsNeighbors;
 
   /// The province can't send troops to attacks or claims (a wall).
   final bool blocksAttacks;
+
+  /// The owner sees the buildings and power of every territory whose icon
+  /// lies inside this radius around the building's icon (a radar). Given as
+  /// a fraction of the map width; 0 = none.
+  final double revealRadius;
+
+  /// Longer explanation shown in the building's info box.
+  final String details;
 
   const BuildingDef({
     required this.id,
@@ -74,6 +82,8 @@ class BuildingDef {
     this.effect,
     this.revealsNeighbors = false,
     this.blocksAttacks = false,
+    this.revealRadius = 0,
+    this.details = '',
   });
 
   /// True if what this building earns depends on how many bordering
@@ -91,14 +101,11 @@ class BuildingDef {
     if (effect != null) return effect!;
     if (tradesWithNeighbors) {
       if (partners <= 0) {
-        return '+${_trim(goldPerPartnerPerSec * 60)} gold/min for every '
-            'bordering territory you own';
+        return '+${_trim(goldPerPartnerPerSec * 60)} gold/min per neighbor';
       }
-      final word = partners == 1 ? 'territory' : 'territories';
-      return 'trades with $partners bordering $word you own: '
-          '+${_trim(incomeFor(partners) * 60)} gold/min';
+      return '+${_trim(incomeFor(partners) * 60)} gold/min';
     }
-    return 'increases gold production by +${_trim(goldPerSec * 60)} gold/min';
+    return '+${_trim(goldPerSec * 60)} gold/min';
   }
 }
 
@@ -184,6 +191,8 @@ class GameRules {
     icon: Icons.factory,
     cost: 16,
     goldPerSec: 0.001,
+    details: 'Produces gold for you around the clock. Can be built in any '
+        'territory.',
   );
 
   /// Coastal territories only.
@@ -194,6 +203,8 @@ class GameRules {
     cost: 24,
     goldPerSec: 0.0015,
     site: BuildSite.coastal,
+    details: 'Fishing income for territories with a coast. Landlocked '
+        'territories cannot build it.',
   );
 
   /// Island archipelagos only.
@@ -204,6 +215,8 @@ class GameRules {
     cost: 40,
     goldPerSec: 0.0025,
     site: BuildSite.archipelago,
+    details: 'The best gold income, but only island territories can build '
+        'it.',
   );
 
   /// Earns for every bordering territory its owner holds.
@@ -213,6 +226,8 @@ class GameRules {
     icon: Icons.storefront,
     cost: 20,
     goldPerPartnerPerSec: 0.0003,
+    details: 'Earns gold for every bordering territory you own (sea links '
+        'count). Needs at least one neighbor.',
   );
 
   static const BuildingDef fortress = BuildingDef(
@@ -221,7 +236,8 @@ class GameRules {
     icon: Icons.fort,
     cost: 35,
     defenseBonus: 0.5,
-    effect: 'makes this province 50% harder to invade',
+    effect: '+50% defense',
+    details: 'Makes this territory 50% harder to invade.',
   );
 
   /// Triples the power of the province when it is invaded (+200%).
@@ -232,18 +248,33 @@ class GameRules {
     cost: 90,
     defenseBonus: 2.0,
     blocksAttacks: true,
-    effect: 'triples this province\'s power when invaded (3x), but it '
-        'can\'t attack or claim',
+    effect: '3x defense, no attacking',
+    details: 'Triples this territory\'s power when invaded. The territory '
+        'can no longer send troops to attacks or claims.',
   );
 
   /// Lifts the fog of war over every bordering territory.
+  static const BuildingDef watchtower = BuildingDef(
+    id: 'watchtower',
+    name: 'Watchtower',
+    icon: Icons.cell_tower,
+    cost: 55,
+    revealsNeighbors: true,
+    effect: 'Reveals neighbors',
+    details: 'Shows the buildings and power of every bordering territory '
+        '(sea links count).',
+  );
+
+  /// Lifts the fog of war inside a circle around its icon.
   static const BuildingDef radar = BuildingDef(
     id: 'radar',
     name: 'Radar',
-    icon: Icons.settings_input_antenna,
-    cost: 55,
-    revealsNeighbors: true,
-    effect: 'shows the buildings and power of bordering territories',
+    icon: Icons.satellite_alt,
+    cost: 90,
+    revealRadius: 0.06,
+    effect: 'Reveals nearby area',
+    details: 'Shows the buildings and power of every territory inside its '
+        'range. Select the radar on the map to see the range.',
   );
 
   static const BuildingDef barracks = BuildingDef(
@@ -252,7 +283,9 @@ class GameRules {
     icon: Icons.military_tech,
     cost: 30,
     supportsAttacks: true,
-    effect: 'sends its power to attacks by bordering provinces',
+    effect: 'Backs neighbor attacks',
+    details: 'Adds this territory\'s power to attacks launched by bordering '
+        'territories you own.',
   );
 
   static const List<BuildingDef> buildings = [
@@ -262,6 +295,7 @@ class GameRules {
     offshoreRig,
     fortress,
     wall,
+    watchtower,
     radar,
     barracks,
   ];
@@ -305,9 +339,13 @@ class GameRules {
   static double defenseMultiplier(String buildingType) =>
       1 + (buildingById(buildingType)?.defenseBonus ?? 0);
 
-  /// True for a building (radar) that reveals bordering territories.
+  /// True for a building (watchtower) that reveals bordering territories.
   static bool revealsNeighbors(String buildingType) =>
       buildingById(buildingType)?.revealsNeighbors ?? false;
+
+  /// Reveal radius of a building as a fraction of the map width (0 = none).
+  static double revealRadiusOf(String buildingType) =>
+      buildingById(buildingType)?.revealRadius ?? 0;
 
   /// True for a building (barracks) that joins bordering provinces' attacks.
   static bool supportsAttacks(String buildingType) =>

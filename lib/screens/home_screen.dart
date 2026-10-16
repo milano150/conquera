@@ -1,7 +1,7 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../config/dev_session.dart';
 import '../config/saved_world.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
@@ -60,7 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final uid = DevSession.uid;
 
       if (!await _service.worldExists(worldId)) {
         await SavedWorld.clear();
