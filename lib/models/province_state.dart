@@ -17,6 +17,9 @@ class ProvinceState {
   final String buildingType;
   final int buildingLevel;
 
+  /// When the building was last used (a missile silo's last launch).
+  final DateTime? buildingLastUsedAt;
+
   const ProvinceState({
     required this.id,
     required this.ownerId,
@@ -24,12 +27,14 @@ class ProvinceState {
     required this.troopsUpdatedAt,
     required this.buildingType,
     required this.buildingLevel,
+    this.buildingLastUsedAt,
   });
 
   factory ProvinceState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     final building = data['building'];
     final updated = data['troopsUpdatedAt'];
+    final lastUsed = building is Map ? building['lastUsedAt'] : null;
     return ProvinceState(
       id: doc.id,
       ownerId: data['ownerId'] as String?,
@@ -39,8 +44,13 @@ class ProvinceState {
           building is Map ? (building['type'] as String? ?? 'none') : 'none',
       buildingLevel:
           building is Map ? (building['level'] as num?)?.toInt() ?? 0 : 0,
+      buildingLastUsedAt: lastUsed is Timestamp ? lastUsed.toDate() : null,
     );
   }
+
+  /// When a missile silo here can fire again (null = ready).
+  DateTime? get missileReadyAt =>
+      buildingLastUsedAt?.add(GameRules.missileCooldown);
 
   bool get hasBuilding => buildingType != 'none' && buildingType.isNotEmpty;
 

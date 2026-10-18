@@ -20,19 +20,22 @@ class MapPainter extends CustomPainter {
   /// Provinces left out of this layer (the battle layer draws them itself,
   /// e.g. while one shakes).
   final Set<String> hiddenIds;
-  final Color fillColor;
-  final Color strokeColor;
+  final Color? _fillColor;
+  final Color? _strokeColor;
+  Color get fillColor => _fillColor ?? ConqueraColors.land;
+  Color get strokeColor => _strokeColor ?? ConqueraColors.border;
   final double strokeWidth;
 
   MapPainter({
     required this.provinces,
     this.ownerFillColors = const <String, Color>{},
     this.hiddenIds = const <String>{},
-    this.fillColor = ConqueraColors.land,
-    this.strokeColor = ConqueraColors.border,
+    Color? fillColor,
+    Color? strokeColor,
     this.strokeWidth = 0.5,
     this.wrapWidth = 0,
-  });
+  })  : _fillColor = fillColor,
+        _strokeColor = strokeColor;
 
   /// Width of one world in map units. When set, the layer is drawn twice
   /// side by side so the map can wrap around horizontally.
@@ -66,6 +69,35 @@ class MapPainter extends CustomPainter {
       canvas.drawPath(province.path, fillPaint);
 
       final ownerColor = ownerFillColors[province.id];
+      if (ownerColor != null && ConqueraColors.neon) {
+        // Neon look: soft glow, translucent vivid fill, bright edge.
+        final neon = _neon(ownerColor);
+        canvas.drawPath(
+          province.path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeJoin = StrokeJoin.round
+            ..strokeWidth = strokeWidth * 5
+            ..color = neon.withAlpha(120)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.2),
+        );
+        canvas.drawPath(
+          province.path,
+          Paint()
+            ..style = PaintingStyle.fill
+            ..color = neon.withAlpha(150),
+        );
+        canvas.drawPath(
+          province.path,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..isAntiAlias = true
+            ..strokeJoin = StrokeJoin.round
+            ..strokeWidth = strokeWidth * 1.6
+            ..color = neon,
+        );
+        continue;
+      }
       if (ownerColor != null) {
         canvas.drawPath(
           province.path,
@@ -77,6 +109,19 @@ class MapPainter extends CustomPainter {
 
       canvas.drawPath(province.path, strokePaint);
     }
+  }
+
+  static final Map<int, Color> _neonCache = {};
+
+  /// Pushes a player's color to a vivid, bright version for dark mode.
+  static Color _neon(Color c) {
+    return _neonCache.putIfAbsent(c.value, () {
+      final h = HSLColor.fromColor(c.withAlpha(255));
+      return h
+          .withSaturation(h.saturation < 0.9 ? 0.9 : h.saturation)
+          .withLightness(h.lightness.clamp(0.52, 0.62).toDouble())
+          .toColor();
+    });
   }
 
   @override
@@ -138,7 +183,7 @@ class SelectionPainter extends CustomPainter {
       ..strokeWidth = px / scale;
 
     canvas.drawPath(selected, line(ConqueraColors.ink, _casingPx));
-    canvas.drawPath(selected, line(Colors.white, _corePx));
+    canvas.drawPath(selected, line(ConqueraColors.onInk, _corePx));
   }
 
   @override
@@ -479,7 +524,11 @@ class BadgePainter extends CustomPainter {
 
   static Color _tint(Color? owner) {
     if (owner == null) return ConqueraColors.ink.withAlpha(_inkAlpha);
-    return Color.lerp(owner.withAlpha(255), ConqueraColors.ink, _inkMix)!
+    return Color.lerp(
+      owner.withAlpha(255),
+      ConqueraColors.neon ? ConqueraColors.onInk : ConqueraColors.ink,
+      _inkMix,
+    )!
         .withAlpha(_inkAlpha);
   }
 
@@ -611,6 +660,10 @@ class BadgePainter extends CustomPainter {
 class RadarPainter extends CustomPainter {
   final List<(Offset, double)> circles;
 
+  /// When set, each circle also gets a glowing edge in this color (a
+  /// missile silo's range is red).
+  final Color? edgeColor;
+
   /// 0..1, already eased.
   final double progress;
   final double wrapWidth;
@@ -620,6 +673,7 @@ class RadarPainter extends CustomPainter {
   RadarPainter({
     required this.circles,
     required this.progress,
+    this.edgeColor,
     this.wrapWidth = 0,
   });
 
@@ -646,11 +700,112 @@ class RadarPainter extends CustomPainter {
       }
     }
     canvas.restore();
+
+    final edge = edgeColor;
+    if (edge == null) return;
+    for (final (c, radius) in circles) {
+      if (radius <= 0) continue;
+      for (final dx in offsets) {
+        final center = Offset(c.dx + dx, c.dy);
+        canvas.drawCircle(
+          center,
+          radius * grow,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = radius * 0.05
+            ..color = edge.withAlpha((110 * progress).round())
+            ..maskFilter = MaskFilter.blur(BlurStyle.normal, radius * 0.03),
+        );
+        canvas.drawCircle(
+          center,
+          radius * grow,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..isAntiAlias = true
+            ..strokeWidth = radius * 0.012
+            ..color = edge.withAlpha((255 * progress).round()),
+        );
+      }
+    }
   }
 
   @override
   bool shouldRepaint(covariant RadarPainter old) =>
       !listEquals(old.circles, circles) ||
+      old.edgeColor != edgeColor ||
       old.progress != progress ||
+      old.wrapWidth != wrapWidth;
+}
+
+/// A small missile in the player's [color], flying in a straight line from
+/// [from] to [to] (map units). [progress] runs 0..1.
+class MissilePainter extends CustomPainter {
+  final Offset from;
+  final Offset to;
+  final Color color;
+  final double progress;
+  final double wrapWidth;
+
+  MissilePainter({
+    required this.from,
+    required this.to,
+    required this.color,
+    required this.progress,
+    this.wrapWidth = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0 || progress >= 1) return;
+
+    // Take the short way round the world.
+    var end = to;
+    if (wrapWidth > 0) {
+      final d = to.dx - from.dx;
+      if (d > wrapWidth / 2) end = to.translate(-wrapWidth, 0);
+      if (d < -wrapWidth / 2) end = to.translate(wrapWidth, 0);
+    }
+    final pos = Offset.lerp(
+      from,
+      end,
+      Curves.easeIn.transform(progress.clamp(0.0, 1.0).toDouble()),
+    )!;
+    final angle = (end - from).direction;
+    final unit = (wrapWidth > 0 ? wrapWidth : 1000) * 0.006;
+
+    final shape = Path()
+      ..moveTo(unit * 2, 0)
+      ..lineTo(unit * 0.6, -unit * 0.6)
+      ..lineTo(-unit * 1.6, -unit * 0.6)
+      ..lineTo(-unit * 2, -unit * 1.2)
+      ..lineTo(-unit * 2, unit * 1.2)
+      ..lineTo(-unit * 1.6, unit * 0.6)
+      ..lineTo(unit * 0.6, unit * 0.6)
+      ..close();
+
+    final copies = wrapWidth > 0 ? [0.0, wrapWidth] : [0.0];
+    for (final dx in copies) {
+      canvas.save();
+      canvas.translate(pos.dx + dx, pos.dy);
+      canvas.rotate(angle);
+      canvas.drawPath(shape, Paint()..color = color);
+      canvas.drawPath(
+        shape,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = unit * 0.25
+          ..strokeJoin = StrokeJoin.round
+          ..color = ConqueraColors.ink,
+      );
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant MissilePainter old) =>
+      old.progress != progress ||
+      old.from != from ||
+      old.to != to ||
+      old.color != color ||
       old.wrapWidth != wrapWidth;
 }

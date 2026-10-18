@@ -61,7 +61,7 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: ConqueraColors.surface,
         border: Border(bottom: BorderSide(color: ConqueraColors.divider)),
       ),

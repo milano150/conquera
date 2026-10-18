@@ -7,29 +7,70 @@ import 'package:google_fonts/google_fonts.dart';
 /// light-blue sea, a header tinted to match, and a deep navy for text and
 /// the selection outline. Land stays pale so players' own colors are the
 /// only saturated hues on the map.
+enum ConqueraMode { light, dark, neon }
+
 class ConqueraColors {
   const ConqueraColors._();
 
+  /// Set by AppSettings. Every getter below reads it, so the whole UI
+  /// follows after a rebuild.
+  static ConqueraMode mode = ConqueraMode.light;
+
+  /// Forces a mode while a screen that must stay light (home, join) is on
+  /// top. Null = follow [mode].
+  static ConqueraMode? override;
+
+  static ConqueraMode get effective => override ?? mode;
+
+  static bool get dark => effective != ConqueraMode.light;
+  static bool get neon => effective == ConqueraMode.neon;
+
+  static Color _p(Color light, Color dark, Color neon) {
+    switch (effective) {
+      case ConqueraMode.light:
+        return light;
+      case ConqueraMode.dark:
+        return dark;
+      case ConqueraMode.neon:
+        return neon;
+    }
+  }
+
   // Map
-  static const Color sea = Color(0xFFA7CBE3);
-  static const Color land = Color(0xFFF1F6F3);
-  static const Color border = Color(0xFF9BB6C6);
+  static Color get sea =>
+      _p(const Color(0xFFA7CBE3), const Color(0xFF0A0F15), const Color(0xFF05080D));
+  static Color get land =>
+      _p(const Color(0xFFF1F6F3), const Color(0xFF18212B), const Color(0xFF0F1823));
+  static Color get border =>
+      _p(const Color(0xFF9BB6C6), const Color(0xFFE3EAF1), const Color(0xFFDDF3FF));
 
   // Interface
-  static const Color surface = Color(0xFFE8F2FA); // header strip
-  static const Color divider = Color(0xFF8DB4D2);
-  static const Color ink = Color(0xFF12324A);
-  static const Color muted = Color(0xFF4F6B82);
-  static const Color accent = Color(0xFF2F6F9F);
+  static Color get surface =>
+      _p(const Color(0xFFE8F2FA), const Color(0xFF111920), const Color(0xFF0A1119));
+  static Color get divider =>
+      _p(const Color(0xFF8DB4D2), const Color(0xFFD3DCE6), const Color(0xFFCBEBFA));
+  static Color get ink =>
+      _p(const Color(0xFF12324A), const Color(0xFFE4ECF3), const Color(0xFFE6F7FF));
+  static Color get muted =>
+      _p(const Color(0xFF4F6B82), const Color(0xFF8396A8), const Color(0xFF6F91AB));
+  static Color get accent =>
+      _p(const Color(0xFF2F6F9F), const Color(0xFF5DAEE3), const Color(0xFF00E5FF));
+
+  /// Contrast color for things drawn on top of [ink] (selection core).
+  static Color get onInk =>
+      _p(Colors.white, const Color(0xFF0A0F15), const Color(0xFF05080D));
 
   // Gold is the one resource color.
-  static const Color brass = Color(0xFFB8892B);
+  static Color get brass =>
+      _p(const Color(0xFFB8892B), const Color(0xFFD9A94A), const Color(0xFFFFC53D));
 
   // Errors and "can't afford" hints.
-  static const Color danger = Color(0xFF9B2C2C);
+  static Color get danger =>
+      _p(const Color(0xFF9B2C2C), const Color(0xFFE86F6F), const Color(0xFFFF4D6D));
 
   // Good news (a war you started, an attack you won).
-  static const Color success = Color(0xFF2E7D4F);
+  static Color get success =>
+      _p(const Color(0xFF2E7D4F), const Color(0xFF5CC78D), const Color(0xFF39FF9C));
 }
 
 /// Spacing scale (logical pixels).
@@ -101,14 +142,16 @@ class ConqueraText {
 ThemeData buildConqueraTheme() {
   final base = ThemeData(
     useMaterial3: true,
-    brightness: Brightness.light,
-    colorScheme: const ColorScheme.light(
+    brightness: ConqueraColors.dark ? Brightness.dark : Brightness.light,
+    colorScheme: (ConqueraColors.dark ? const ColorScheme.dark() : const ColorScheme.light())
+        .copyWith(
       primary: ConqueraColors.ink,
-      onPrimary: Colors.white,
+      onPrimary: ConqueraColors.onInk,
       surface: ConqueraColors.surface,
       onSurface: ConqueraColors.ink,
     ),
     scaffoldBackgroundColor: ConqueraColors.sea,
+    dialogBackgroundColor: ConqueraColors.surface,
   );
 
   // One button look for the whole game: hollow, thin outline, regular
@@ -122,7 +165,7 @@ ThemeData buildConqueraTheme() {
       bodyColor: ConqueraColors.ink,
       displayColor: ConqueraColors.ink,
     ),
-    progressIndicatorTheme: const ProgressIndicatorThemeData(
+    progressIndicatorTheme: ProgressIndicatorThemeData(
       color: ConqueraColors.accent,
     ),
     filledButtonTheme: FilledButtonThemeData(style: hollow),

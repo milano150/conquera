@@ -11,6 +11,7 @@ import '../config/game_rules.dart';
 import '../services/server_clock.dart';
 import '../models/attack_result.dart';
 import '../models/battle_event.dart';
+import '../models/missile_event.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
@@ -123,6 +124,8 @@ class _MapScreenState extends State<MapScreen>
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
+  StreamSubscription<MissileEvent>? _missilesSub;
+  final Set<String> _seenMissileIds = {};
 
   /// Attacks by other players waiting to be played on this map.
   final List<BattleEvent> _eventQueue = [];
@@ -213,6 +216,17 @@ class _MapScreenState extends State<MapScreen>
   );
   List<(Offset, double)> _radarCircles = const [];
   bool _radarOn = false;
+  bool _radarRed = false;
+
+  /// The silo (province id) the player is aiming from; null = not aiming.
+  String? _missileSiloId;
+
+  /// The missile currently in flight on the map, if any.
+  ({Offset from, Offset to, Color color})? _missile;
+  late final AnimationController _missileCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1300),
+  );
 
   /// The pop-up text, 0..1.
   late final AnimationController _popupAnim = AnimationController(
@@ -273,6 +287,10 @@ class _MapScreenState extends State<MapScreen>
       _onBattleEvent,
       onError: (Object e) => debugPrint('Battle events stream error: $e'),
     );
+    _missilesSub = _firestore.watchMissileEvents(gameId: widget.gameId).listen(
+      _onMissileEvent,
+      onError: (Object e) => debugPrint('Missile events stream error: $e'),
+    );
   }
 
   @override
@@ -280,6 +298,8 @@ class _MapScreenState extends State<MapScreen>
     _provincesSub?.cancel();
     _playersSub?.cancel();
     _eventsSub?.cancel();
+    _missilesSub?.cancel();
+    _missileCtl.dispose();
     _provinceStates.dispose();
     _players.dispose();
     _dataReady.dispose();
@@ -519,17 +539,48 @@ class _MapScreenState extends State<MapScreen>
     return false;
   }
 
-  /// Keeps the radar dimming in step with the selection: on while the
-  /// player's own radar is selected, fading out otherwise.
+  /// Centre and radius (map units) of each of the player's missile silos.
+  List<(Offset, double)> _mySilos() {
+    final width = _controller.mapSize.width;
+    final out = <(Offset, double)>[];
+    _provinceStates.value.forEach((id, s) {
+      if (s.ownerId != _uid) return;
+      final fraction = GameRules.missileRadiusOf(s.buildingType);
+      if (fraction <= 0) return;
+      final province = _controller.provinceById(id);
+      if (province != null) out.add((province.anchor, fraction * width));
+    });
+    return out;
+  }
+
+  /// Keeps the range overlay in step with the selection: a selected radar
+  /// shows every radar's range, a selected missile silo shows every silo's
+  /// range with a red edge, and while aiming a missile only that silo's
+  /// range stays up. Fades out otherwise.
   void _syncRadar(Province? selected, ProvinceState? state) {
-    final fraction =
-        (selected != null && state != null && state.ownerId == _uid)
-            ? GameRules.revealRadiusOf(state.buildingType)
-            : 0.0;
-    final on = fraction > 0;
-    if (on) {
-      // Show the range of every radar the player owns, not just this one.
-      _radarCircles = _myRadars();
+    final mine = selected != null && state != null && state.ownerId == _uid;
+    List<(Offset, double)>? circles;
+    var red = false;
+
+    final aimId = _missileSiloId;
+    final aimProvince = aimId == null ? null : _controller.provinceById(aimId);
+    if (aimProvince != null) {
+      final fraction = GameRules.missileRadiusOf(
+        _provinceStates.value[aimId]?.buildingType ?? '',
+      );
+      circles = [(aimProvince.anchor, fraction * _controller.mapSize.width)];
+      red = true;
+    } else if (mine && GameRules.revealRadiusOf(state!.buildingType) > 0) {
+      circles = _myRadars();
+    } else if (mine && GameRules.missileRadiusOf(state!.buildingType) > 0) {
+      circles = _mySilos();
+      red = true;
+    }
+
+    final on = circles != null;
+    if (circles != null) {
+      _radarCircles = circles;
+      _radarRed = red;
     }
     if (on == _radarOn) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -625,7 +676,7 @@ class _MapScreenState extends State<MapScreen>
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: ConqueraColors.divider),
+          side: BorderSide(color: ConqueraColors.divider),
         ),
         title: Text('Claim ${target.name}?', style: ConqueraText.name),
         content: Text.rich(
@@ -1259,7 +1310,7 @@ class _MapScreenState extends State<MapScreen>
                         width: 1.5,
                       ),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.priority_high,
                       color: ConqueraColors.danger,
                       size: 18,
@@ -1305,6 +1356,167 @@ class _MapScreenState extends State<MapScreen>
   }
 
   /// Opens the build / reinforce window for [province].
+  // --- Missile silo ------------------------------------------------------
+
+  /// The USE button beside Manage.
+  void _useBuilding(Province province, ProvinceState? state) {
+    if (_battleRunning || state == null || state.ownerId != _uid) return;
+    if (GameRules.missileRadiusOf(state.buildingType) <= 0) return;
+
+    final readyAt = state.missileReadyAt;
+    final now = ServerClock.now();
+    if (readyAt != null && now.isBefore(readyAt)) {
+      final mins = (readyAt.difference(now).inSeconds / 60).ceil();
+      _toast('This silo reloads in $mins min.');
+      return;
+    }
+    final gold = _players.value[_uid]?.goldAt(now) ?? 0;
+    if (gold < GameRules.missileCost) {
+      _toast('A missile costs ${GameRules.missileCost} gold.');
+      return;
+    }
+    setState(() => _missileSiloId = province.id);
+    _toast('Tap an enemy territory inside the red circle.');
+  }
+
+  void _cancelMissile() {
+    if (_missileSiloId == null) return;
+    setState(() => _missileSiloId = null);
+  }
+
+  void _toast(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  bool _inMissileRange(String siloId, Province target) {
+    final silo = _controller.provinceById(siloId);
+    final fraction = GameRules.missileRadiusOf(
+      _provinceStates.value[siloId]?.buildingType ?? '',
+    );
+    if (silo == null || fraction <= 0) return false;
+    final width = _controller.mapSize.width;
+    var dx = (target.anchor.dx - silo.anchor.dx).abs();
+    if (width > 0) dx = min(dx, width - dx);
+    final dy = target.anchor.dy - silo.anchor.dy;
+    final r = fraction * width;
+    return dx * dx + dy * dy <= r * r;
+  }
+
+  /// A tap while aiming: the tapped territory is the target.
+  Future<void> _onMissileTap() async {
+    final siloId = _missileSiloId;
+    final target = _controller.selectedProvince;
+    if (siloId == null || target == null) return;
+    if (target.id == siloId) {
+      _cancelMissile();
+      return;
+    }
+    final ownerId = _provinceStates.value[target.id]?.ownerId;
+    if (ownerId == null || ownerId == _uid) {
+      _toast('Pick an enemy territory.');
+      return;
+    }
+    if (!_inMissileRange(siloId, target)) {
+      _toast('Out of range.');
+      return;
+    }
+
+
+    String? error;
+    try {
+      await _firestore.fireMissile(
+        gameId: widget.gameId,
+        uid: _uid,
+        siloId: siloId,
+        targetId: target.id,
+      );
+    } on GameActionException catch (e) {
+      error = e.message;
+    } catch (e) {
+      debugPrint('Missile failed: $e');
+      error = 'Something went wrong. Try again.';
+    }
+    if (!mounted) return;
+    setState(() => _missileSiloId = null);
+    if (error != null) _toast(error);
+  }
+
+  /// Plays every launch on every player's map.
+  void _onMissileEvent(MissileEvent e) {
+    if (!_seenMissileIds.add(e.id)) return;
+    final at = e.at;
+    if (at != null && ServerClock.now().difference(at).inSeconds > 20) return;
+    final from = _controller.provinceById(e.fromId);
+    final to = _controller.provinceById(e.targetId);
+    if (from == null || to == null) return;
+    _playMissile(e, from.anchor, to.anchor);
+  }
+
+  /// The missile flies in a straight line in its owner's color; when it
+  /// lands, a pop-up names the building it destroyed.
+  Future<void> _playMissile(MissileEvent e, Offset from, Offset to) async {
+    final color = _players.value[e.attackerId]?.color ?? ConqueraColors.danger;
+    setState(() => _missile = (from: from, to: to, color: color));
+    await _missileCtl.forward(from: 0);
+    if (!mounted) return;
+    setState(() => _missile = null);
+
+    final name = GameRules.buildingById(e.building)?.name;
+    if (name == null || _battleRunning) return;
+    final popup = _Popup(
+      anchor: to,
+      lead: 'Destroyed ',
+      name: name,
+      nameColor: ConqueraColors.danger,
+    );
+    setState(() => _popup = popup);
+    await _popupAnim.forward(from: 0);
+    if (mounted && identical(_popup, popup)) setState(() => _popup = null);
+  }
+
+  Widget _missileBanner() {
+    return Positioned(
+      left: ConqueraSpace.md,
+      right: ConqueraSpace.md,
+      bottom: ConqueraSpace.md + MediaQuery.of(context).padding.bottom,
+      child: IgnorePointer(
+        ignoring: _missileSiloId == null,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 140),
+          opacity: _missileSiloId == null ? 0 : 1,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.only(
+                left: ConqueraSpace.md,
+                right: ConqueraSpace.xs,
+              ),
+              decoration: BoxDecoration(
+                color: ConqueraColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: ConqueraColors.danger, width: 1.5),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.gps_fixed, size: 18, color: ConqueraColors.danger),
+                  const SizedBox(width: ConqueraSpace.sm),
+                  Text('Pick a target in range', style: ConqueraText.value),
+                  const SizedBox(width: ConqueraSpace.sm),
+                  TextButton(
+                    onPressed: _cancelMissile,
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openDetails(Province province) {
     showDialog<void>(
       context: context,
@@ -1337,6 +1549,7 @@ class _MapScreenState extends State<MapScreen>
         w > 0 ? Offset(p.dx % w, p.dy) : p,
         scale: _transform.value.getMaxScaleOnAxis(),
       );
+      if (_missileSiloId != null) _onMissileTap();
     }
   }
 
@@ -1649,6 +1862,9 @@ class _MapScreenState extends State<MapScreen>
                                             size: sceneSize,
                                             painter: RadarPainter(
                                               circles: _radarCircles,
+                                              edgeColor: _radarRed
+                                                  ? ConqueraColors.danger
+                                                  : null,
                                               progress: Curves.easeInOut
                                                   .transform(_radarCtl.value),
                                               wrapWidth: mapSize.width,
@@ -1657,6 +1873,24 @@ class _MapScreenState extends State<MapScreen>
                                         ),
                                       ),
                                     ),
+                                    if (_missile != null)
+                                      IgnorePointer(
+                                        child: RepaintBoundary(
+                                          child: AnimatedBuilder(
+                                            animation: _missileCtl,
+                                            builder: (context, _) => CustomPaint(
+                                              size: sceneSize,
+                                              painter: MissilePainter(
+                                                from: _missile!.from,
+                                                to: _missile!.to,
+                                                color: _missile!.color,
+                                                progress: _missileCtl.value,
+                                                wrapWidth: mapSize.width,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     IgnorePointer(
                                       child: RepaintBoundary(
                                         child: AnimatedBuilder(
@@ -1691,6 +1925,7 @@ class _MapScreenState extends State<MapScreen>
                         ),
                       ),
                     _attackAlert(),
+                    _missileBanner(),
                     Positioned(
                       top: 0,
                       left: 0,
@@ -1723,6 +1958,14 @@ class _MapScreenState extends State<MapScreen>
                                 attackReadyAt: attackReadyAt,
                                 onAttack: () => _openAttack(selected),
                                 onClaim: () => _claim(selected),
+                                useIcon: selectedState?.ownerId == _uid
+                                    ? GameRules.buildingById(
+                                        selectedState!.buildingType,
+                                      )?.useIcon
+                                    : null,
+                                useColor: ConqueraColors.danger,
+                                useReadyAt: selectedState?.missileReadyAt,
+                                onUse: () => _useBuilding(selected, selectedState),
                               ),
                       ),
                     ),

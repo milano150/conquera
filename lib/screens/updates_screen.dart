@@ -123,7 +123,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                 ],
               ),
             ),
-            const Divider(height: 1, color: ConqueraColors.divider),
+            Divider(height: 1, color: ConqueraColors.divider),
             Expanded(child: _body()),
           ],
         ),
@@ -172,6 +172,16 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
         );
       case UpdateType.attack:
         return _war(e);
+      case UpdateType.missile:
+        final mine = e.attackerId == widget.uid;
+        return _simple(
+          e,
+          mine ? ConqueraColors.success : ConqueraColors.danger,
+          '${mine ? 'You hit' : '${_player(e.attackerId)} hit'} '
+          '${_province(e.targetId)} with a missile'
+          '${e.targetBuilding != 'none' ? ': ${_building(e.targetBuilding)} destroyed' : ''}'
+          ', -${e.powerRemoved.floor()} power',
+        );
     }
   }
 
@@ -325,7 +335,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
       // the card was expanding.)
       Stack(
         children: [
-          const Positioned.fill(
+          Positioned.fill(
             child: Align(
               child: SizedBox(
                 width: 1,

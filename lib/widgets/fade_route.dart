@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// the way through. Both halves belong to this route, so it works over any
 /// screen underneath, and popping plays it backwards.
 class FadeRoute<T> extends PageRouteBuilder<T> {
-  FadeRoute({required WidgetBuilder builder})
+  FadeRoute({required WidgetBuilder builder, super.settings})
       : super(
           pageBuilder: (context, animation, secondaryAnimation) =>
               builder(context),

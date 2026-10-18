@@ -23,7 +23,7 @@ class GoldIcon extends StatelessWidget {
       errorBuilder: (context, error, stackTrace) => Container(
         width: size * 0.85,
         height: size * 0.85,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: ConqueraColors.brass,
           shape: BoxShape.circle,
         ),

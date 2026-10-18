@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 
@@ -43,6 +44,16 @@ class CountryInfoPanel extends StatelessWidget {
   final VoidCallback? onAttack;
   final VoidCallback? onClaim;
 
+  /// Icon of the USE button beside Manage (a missile silo's launch).
+  /// Null = no button.
+  final IconData? useIcon;
+  final Color? useColor;
+  final VoidCallback? onUse;
+
+  /// When the building can be used again (null or past = ready). Shown
+  /// as a countdown inside the USE button.
+  final DateTime? useReadyAt;
+
   const CountryInfoPanel({
     super.key,
     required this.name,
@@ -59,12 +70,16 @@ class CountryInfoPanel extends StatelessWidget {
     this.attackReadyAt,
     this.onAttack,
     this.onClaim,
+    this.useIcon,
+    this.useColor,
+    this.onUse,
+    this.useReadyAt,
   });
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: ConqueraColors.surface,
         border: Border(bottom: BorderSide(color: ConqueraColors.divider)),
       ),
@@ -155,11 +170,21 @@ class CountryInfoPanel extends StatelessWidget {
                           onPressed: onClaim,
                         ),
                     ]
-                  else
+                  else ...[
+                    if (useIcon != null) ...[
+                      _UseButton(
+                        icon: useIcon!,
+                        color: useColor ?? ConqueraColors.ink,
+                        readyAt: useReadyAt,
+                        onPressed: onUse,
+                      ),
+                      const SizedBox(width: ConqueraSpace.sm),
+                    ],
                     OutlinedButton(
                       onPressed: onOpenDetails,
                       child: const Text('Manage'),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -282,6 +307,91 @@ class _ActionButtonState extends State<_ActionButton> {
           Text(hint, style: ConqueraText.label),
         ],
       ],
+    );
+  }
+}
+
+/// The icon-only USE button. While the building reloads it shows the
+/// time left next to the icon and goes muted.
+class _UseButton extends StatefulWidget {
+  final IconData icon;
+  final Color color;
+  final DateTime? readyAt;
+  final VoidCallback? onPressed;
+
+  const _UseButton({
+    required this.icon,
+    required this.color,
+    required this.readyAt,
+    required this.onPressed,
+  });
+
+  @override
+  State<_UseButton> createState() => _UseButtonState();
+}
+
+class _UseButtonState extends State<_UseButton> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _left() != null) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Duration? _left() {
+    final at = widget.readyAt;
+    if (at == null) return null;
+    final d = at.difference(ServerClock.now());
+    return d > Duration.zero ? d : null;
+  }
+
+  static String _fmt(Duration d) {
+    final s = d.inSeconds;
+    final h = s ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+    final sec = s % 60;
+    String two(int v) => v.toString().padLeft(2, '0');
+    return h > 0 ? '${h}h ${two(m)}m' : '${two(m)}:${two(sec)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final left = _left();
+    final color = left == null ? widget.color : ConqueraColors.muted;
+    return OutlinedButton(
+      onPressed: widget.onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        side: BorderSide(color: left == null ? color : ConqueraColors.divider),
+        minimumSize: const Size(44, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(widget.icon, size: 20),
+          if (left != null) ...[
+            const SizedBox(width: 6),
+            Text(
+              _fmt(left),
+              style: ConqueraText.value.copyWith(
+                color: color,
+                fontSize: 13,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

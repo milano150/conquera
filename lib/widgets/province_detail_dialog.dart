@@ -163,7 +163,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: ConqueraColors.divider),
+          side: BorderSide(color: ConqueraColors.divider),
         ),
         title: Text('Destroy $label?', style: ConqueraText.name),
         content: Text(
@@ -179,7 +179,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             onPressed: () => Navigator.of(context).pop(true),
             style: OutlinedButton.styleFrom(
               foregroundColor: ConqueraColors.danger,
-              side: const BorderSide(color: ConqueraColors.danger),
+              side: BorderSide(color: ConqueraColors.danger),
             ),
             child: const Text('Destroy'),
           ),
@@ -221,7 +221,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
       insetPadding: const EdgeInsets.all(ConqueraSpace.md),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: ConqueraColors.divider),
+        side: BorderSide(color: ConqueraColors.divider),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -313,7 +313,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
           // Owner-only sections
           if (ownedByMe) ...[
             const SizedBox(height: ConqueraSpace.lg),
-            const Divider(height: 1, color: ConqueraColors.divider),
+            Divider(height: 1, color: ConqueraColors.divider),
             const SizedBox(height: ConqueraSpace.lg),
             const _SectionTitle('Build'),
             const SizedBox(height: ConqueraSpace.sm),
@@ -324,7 +324,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               buildReadyAt: players[widget.uid]?.buildReadyAt,
             ),
             const SizedBox(height: ConqueraSpace.lg),
-            const Divider(height: 1, color: ConqueraColors.divider),
+            Divider(height: 1, color: ConqueraColors.divider),
             const SizedBox(height: ConqueraSpace.lg),
             const _SectionTitle('Reinforce'),
             const SizedBox(height: ConqueraSpace.sm),
@@ -531,7 +531,7 @@ class _IconSlot extends StatelessWidget {
 
     if (!preview) return box;
     return CustomPaint(
-      foregroundPainter: const _DashedBorderPainter(
+      foregroundPainter: _DashedBorderPainter(
         color: ConqueraColors.accent,
         radius: 6,
       ),
@@ -604,7 +604,7 @@ class _LockedField extends StatelessWidget {
               style: ConqueraText.value,
             ),
           ),
-          const Icon(Icons.lock_outline, size: 16, color: ConqueraColors.muted),
+          Icon(Icons.lock_outline, size: 16, color: ConqueraColors.muted),
         ],
       ),
     );
@@ -716,7 +716,7 @@ class _Dropdown<T> extends StatelessWidget {
             hint,
             style: ConqueraText.value.copyWith(color: ConqueraColors.muted),
           ),
-          icon: const Icon(Icons.expand_more, color: ConqueraColors.muted),
+          icon: Icon(Icons.expand_more, color: ConqueraColors.muted),
           style: ConqueraText.value,
           dropdownColor: ConqueraColors.surface,
           borderRadius: BorderRadius.circular(6),
@@ -795,7 +795,7 @@ class _PickerField extends StatelessWidget {
       color: Colors.white.withAlpha(onTap == null ? 70 : 170),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(6),
-        side: const BorderSide(color: ConqueraColors.divider),
+        side: BorderSide(color: ConqueraColors.divider),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -827,7 +827,7 @@ class _PickerField extends StatelessWidget {
                             .copyWith(color: ConqueraColors.muted),
                       ),
               ),
-              const Icon(Icons.expand_more, color: ConqueraColors.muted),
+              Icon(Icons.expand_more, color: ConqueraColors.muted),
             ],
           ),
         ),
@@ -849,7 +849,7 @@ enum _Category {
 _Category _categoryOf(BuildingDef b) => switch (b.id) {
       'watchtower' || 'radar' => _Category.surveillance,
       'fortress' || 'wall' => _Category.defense,
-      'barracks' => _Category.military,
+      'barracks' || 'missile_silo' => _Category.military,
       _ => _Category.production,
     };
 
@@ -882,7 +882,7 @@ class _BuildingPicker extends StatelessWidget {
       insetPadding: const EdgeInsets.all(ConqueraSpace.md),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: ConqueraColors.divider),
+        side: BorderSide(color: ConqueraColors.divider),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -923,7 +923,7 @@ class _BuildingPicker extends StatelessWidget {
     if (items.isEmpty) return const [];
     return [
       const SizedBox(height: ConqueraSpace.md),
-      const Divider(height: 1, color: ConqueraColors.divider),
+      Divider(height: 1, color: ConqueraColors.divider),
       const SizedBox(height: ConqueraSpace.md),
       _SectionTitle(category.label),
       const SizedBox(height: ConqueraSpace.sm),
@@ -979,7 +979,7 @@ class _BuildingTile extends StatelessWidget {
           child: GestureDetector(
             onTap: onInfo,
             behavior: HitTestBehavior.opaque,
-            child: const Padding(
+            child: Padding(
               padding: EdgeInsets.all(4),
               child: Icon(
                 Icons.info_outline,
@@ -1078,7 +1078,7 @@ class _BuildingInfoDialog extends StatelessWidget {
       insetPadding: const EdgeInsets.all(ConqueraSpace.md),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: ConqueraColors.divider),
+        side: BorderSide(color: ConqueraColors.divider),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 340),
@@ -1107,7 +1107,7 @@ class _BuildingInfoDialog extends StatelessWidget {
               const SizedBox(height: ConqueraSpace.sm),
               Text(building.details, style: ConqueraText.value),
               const SizedBox(height: ConqueraSpace.sm),
-              const Divider(height: 1, color: ConqueraColors.divider),
+              Divider(height: 1, color: ConqueraColors.divider),
               _row('Cost', GoldAmount(building.cost, style: ConqueraText.value)),
               _row(
                 'Effect',

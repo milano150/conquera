@@ -6,6 +6,7 @@ import '../config/saved_world.dart';
 import '../services/firestore_service.dart';
 import '../theme/conquera_theme.dart';
 import '../widgets/fade_route.dart';
+import '../widgets/light_screens_observer.dart';
 import '../widgets/conquera_text_field.dart';
 import 'join_screen.dart';
 import 'map_screen.dart';
@@ -80,6 +81,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       await Navigator.of(context).push(
         FadeRoute<void>(
+          // The join screen always stays light; the map follows the setting.
+          settings: joined ? null : const RouteSettings(name: kLightRouteName),
           builder: (_) => joined
               ? MapScreen(gameId: worldId)
               : JoinScreen(gameId: worldId),
@@ -96,7 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: ConqueraColors.land,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

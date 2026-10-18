@@ -208,7 +208,7 @@ class _AttackDialogState extends State<AttackDialog> {
         insetPadding: const EdgeInsets.all(ConqueraSpace.md),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: ConqueraColors.divider),
+          side: BorderSide(color: ConqueraColors.divider),
         ),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),

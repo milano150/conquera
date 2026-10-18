@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../config/game_rules.dart';
 import '../models/battle_event.dart';
+import '../models/missile_event.dart';
 import '../models/log_entry.dart';
 import '../models/attack_result.dart';
 import '../models/player_state.dart';
@@ -83,6 +84,23 @@ class FirestoreService {
               if (c.type == DocumentChangeType.added &&
                   (c.doc.data()?['type'] ?? 'attack') == 'attack')
                 BattleEvent.fromDoc(c.doc),
+          ],
+        );
+  }
+
+  /// Every missile launch, so all players can watch it fly. The first
+  /// snapshot replays recent history; callers skip old events.
+  Stream<MissileEvent> watchMissileEvents({required String gameId}) {
+    return _gameRef(gameId)
+        .collection('missiles')
+        .orderBy('at', descending: true)
+        .limit(5)
+        .snapshots()
+        .expand(
+          (snap) => [
+            for (final c in snap.docChanges)
+              if (c.type == DocumentChangeType.added)
+                MissileEvent.fromDoc(c.doc),
           ],
         );
   }
@@ -532,6 +550,119 @@ class FirestoreService {
         'type': 'destroy',
         'provinceId': provinceId,
         'buildingId': _buildingTypeOf(data),
+        'at': FieldValue.serverTimestamp(),
+      });
+      return null;
+    });
+
+    if (error != null) throw GameActionException(error);
+  }
+
+  /// Fires the missile silo in [siloId] at the enemy province [targetId]
+  /// (the caller checks the range). Costs [GameRules.missileCost], and the
+  /// silo then reloads for [GameRules.missileCooldown]. A hit destroys the
+  /// building in the target and removes [GameRules.missilePowerDamage] power
+  /// (the garrison of 1 stays). Both players get an Update; there is no Log
+  /// entry. Throws [GameActionException] if it isn't allowed.
+  Future<void> fireMissile({
+    required String gameId,
+    required String uid,
+    required String siloId,
+    required String targetId,
+  }) async {
+    final siloRef = _provincesRef(gameId).doc(siloId);
+    final targetRef = _provincesRef(gameId).doc(targetId);
+    final attackerRef = _playerRef(gameId, uid);
+
+    final error = await _db.runTransaction<String?>((tx) async {
+      final siloSnap = await tx.get(siloRef);
+      final targetSnap = await tx.get(targetRef);
+      final attackerSnap = await tx.get(attackerRef);
+
+      final silo = siloSnap.data();
+      final target = targetSnap.data();
+      if (!siloSnap.exists ||
+          silo?['ownerId'] != uid ||
+          _buildingTypeOf(silo) != GameRules.missileSilo.id) {
+        return 'You need a missile silo here.';
+      }
+      final victimId = target?['ownerId'];
+      if (!targetSnap.exists || victimId is! String) {
+        return 'There is nothing to hit there.';
+      }
+      if (victimId == uid) return "You can't fire at your own territory.";
+      if (!attackerSnap.exists) return 'Player not found.';
+      final victimRef = _playerRef(gameId, victimId);
+      final victimSnap = await tx.get(victimRef);
+
+      final now = ServerClock.now();
+      final siloBuilding = silo?['building'];
+      final lastUsed = siloBuilding is Map ? siloBuilding['lastUsedAt'] : null;
+      if (lastUsed is Timestamp) {
+        final readyAt = lastUsed.toDate().add(GameRules.missileCooldown);
+        if (now.isBefore(readyAt)) {
+          final mins = (readyAt.difference(now).inSeconds / 60).ceil();
+          return 'This silo reloads in $mins min.';
+        }
+      }
+      final gold = PlayerState.fromDoc(attackerSnap).goldAt(now);
+      if (gold < GameRules.missileCost) return 'Not enough gold.';
+
+      final hitBuilding = _buildingTypeOf(target);
+      final troops = (target?['troops'] as num?)?.toDouble() ?? 0;
+      final reduced = troops - GameRules.missilePowerDamage;
+      final left = troops <= 1 ? troops : (reduced < 1 ? 1.0 : reduced);
+      final removedIncome = _buildingIncomeOf(target);
+
+      tx.update(siloRef, {'building.lastUsedAt': Timestamp.fromDate(now)});
+      tx.update(targetRef, {
+        'troops': left,
+        'troopsUpdatedAt': FieldValue.serverTimestamp(),
+        'building': {'type': 'none', 'level': 0},
+      });
+      tx.update(
+        attackerRef,
+        _settledIncomeUpdate(
+          attackerSnap,
+          owned: _ownedCount(attackerSnap),
+          buildingIncome: _buildingIncome(attackerSnap),
+          now: now,
+          spend: GameRules.missileCost.toDouble(),
+        ),
+      );
+      if (victimSnap.exists && removedIncome > 0) {
+        tx.update(
+          victimRef,
+          _settledIncomeUpdate(
+            victimSnap,
+            owned: _ownedCount(victimSnap),
+            buildingIncome: _buildingIncome(victimSnap) - removedIncome,
+            now: now,
+          ),
+        );
+      }
+
+      // Both players get the same Update. Nothing goes into the Log.
+      final report = {
+        'type': 'missile',
+        'attackerId': uid,
+        'defenderId': victimId,
+        'targetId': targetId,
+        'provinceId': siloId,
+        'targetBuilding': hitBuilding,
+        'powerRemoved': troops - left,
+        'at': FieldValue.serverTimestamp(),
+      };
+      tx.set(attackerRef.collection('updates').doc(), report);
+      tx.set(victimRef.collection('updates').doc(), report);
+
+      // For the flight animation on everybody's map.
+      tx.set(_gameRef(gameId).collection('missiles').doc(), {
+        'attackerId': uid,
+        'defenderId': victimId,
+        'fromId': siloId,
+        'targetId': targetId,
+        'building': hitBuilding,
         'at': FieldValue.serverTimestamp(),
       });
       return null;

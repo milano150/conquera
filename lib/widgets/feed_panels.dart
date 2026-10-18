@@ -231,6 +231,18 @@ class HistoryPanel extends StatelessWidget {
                 '${_building(e.buildingId)} destroyed in ${_province(e.provinceId)}',
           ),
         ], e.at);
+      case UpdateType.missile:
+        final shot = e.attackerId == uid;
+        return _miniLine(
+          shot ? ConqueraColors.success : ConqueraColors.danger,
+          [
+            TextSpan(
+              text: '${shot ? 'You hit' : '${_player(e.attackerId)} hit'} '
+                  '${_province(e.targetId)} with a missile',
+            ),
+          ],
+          e.at,
+        );
       case UpdateType.attack:
         final mine = e.attackerId == uid;
         final color = e.won == mine ? ConqueraColors.success : ConqueraColors.danger;

@@ -66,6 +66,13 @@ class BuildingDef {
   /// a fraction of the map width; 0 = none.
   final double revealRadius;
 
+  /// How far this building can fire missiles, as a fraction of the map
+  /// width (a missile silo); 0 = it can't.
+  final double missileRadius;
+
+  /// Icon of the USE button shown beside Manage. Null = no use button.
+  final IconData? useIcon;
+
   /// Longer explanation shown in the building's info box.
   final String details;
 
@@ -83,6 +90,8 @@ class BuildingDef {
     this.revealsNeighbors = false,
     this.blocksAttacks = false,
     this.revealRadius = 0,
+    this.missileRadius = 0,
+    this.useIcon,
     this.details = '',
   });
 
@@ -288,6 +297,29 @@ class GameRules {
         'territories you own.',
   );
 
+  /// Fires missiles at enemy territories inside its range.
+  static const BuildingDef missileSilo = BuildingDef(
+    id: 'missile_silo',
+    name: 'Missile silo',
+    icon: Icons.rocket_launch,
+    cost: 160,
+    missileRadius: 0.09,
+    useIcon: Icons.gps_fixed,
+    effect: 'Fires missiles in range',
+    details: 'Fires a missile at an enemy territory inside its range for 100 '
+        'gold (1 hour cooldown per silo). A hit destroys the building there '
+        'and removes 20 power. Select the silo on the map to see the range.',
+  );
+
+  /// Gold a missile launch costs.
+  static const int missileCost = 100;
+
+  /// How long a silo must reload between launches.
+  static const Duration missileCooldown = Duration(hours: 1);
+
+  /// Power a missile hit removes from the target territory.
+  static const double missilePowerDamage = 20;
+
   static const List<BuildingDef> buildings = [
     goldMine,
     market,
@@ -298,6 +330,7 @@ class GameRules {
     watchtower,
     radar,
     barracks,
+    missileSilo,
   ];
 
   /// True if [building] may be built in the province [provinceId], which
@@ -346,6 +379,10 @@ class GameRules {
   /// Reveal radius of a building as a fraction of the map width (0 = none).
   static double revealRadiusOf(String buildingType) =>
       buildingById(buildingType)?.revealRadius ?? 0;
+
+  /// Missile range of a building as a fraction of the map width (0 = none).
+  static double missileRadiusOf(String buildingType) =>
+      buildingById(buildingType)?.missileRadius ?? 0;
 
   /// True for a building (barracks) that joins bordering provinces' attacks.
   static bool supportsAttacks(String buildingType) =>

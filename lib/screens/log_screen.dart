@@ -124,7 +124,7 @@ class _LogScreenState extends State<LogScreen> {
                 ],
               ),
             ),
-            const Divider(height: 1, color: ConqueraColors.divider),
+            Divider(height: 1, color: ConqueraColors.divider),
             Expanded(child: _body()),
           ],
         ),

@@ -105,7 +105,7 @@ class HowToPlayScreen extends StatelessWidget {
                 ],
               ),
             ),
-            const Divider(height: 1, color: ConqueraColors.divider),
+            Divider(height: 1, color: ConqueraColors.divider),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.all(ConqueraSpace.md),

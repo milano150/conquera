@@ -8,6 +8,7 @@ import '../models/player_state.dart';
 import '../models/province_state.dart';
 import '../services/firestore_service.dart';
 import '../config/saved_world.dart';
+import '../screens/settings_screen.dart';
 import '../theme/conquera_theme.dart';
 import 'feed_panels.dart';
 import 'leaderboard_panel.dart';
@@ -193,7 +194,7 @@ class _PanelState extends State<_Panel> {
     return Material(
       color: ConqueraColors.surface,
       child: DecoratedBox(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           border: Border(right: BorderSide(color: ConqueraColors.divider)),
         ),
         child: SafeArea(
@@ -263,7 +264,7 @@ class _PanelState extends State<_Panel> {
             ],
           ),
         ),
-        const Divider(height: 1, color: ConqueraColors.divider),
+        Divider(height: 1, color: ConqueraColors.divider),
         _Item(
           label: 'Leaderboard',
           onTap: () => setState(() => _view = _View.leaderboard),
@@ -274,8 +275,12 @@ class _PanelState extends State<_Panel> {
         ),
         _Item(label: 'Log', onTap: () => setState(() => _view = _View.log)),
         _Item(label: 'How to play', onTap: widget.onOpenHowToPlay),
-        // Nothing behind this yet.
-        _Item(label: 'Settings', onTap: () {}),
+        _Item(
+          label: 'Settings',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+          ),
+        ),
         const Spacer(),
         Padding(
           padding: const EdgeInsets.all(ConqueraSpace.md),
@@ -287,7 +292,7 @@ class _PanelState extends State<_Panel> {
             },
             style: OutlinedButton.styleFrom(
               foregroundColor: ConqueraColors.danger,
-              side: const BorderSide(color: ConqueraColors.danger),
+              side: BorderSide(color: ConqueraColors.danger),
             ),
             child: const Text('Back to lobby'),
           ),

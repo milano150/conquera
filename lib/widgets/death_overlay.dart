@@ -172,7 +172,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: ConqueraColors.divider),
+          side: BorderSide(color: ConqueraColors.divider),
         ),
         title: Text('Quit this world?', style: ConqueraText.name),
         content: Text(
@@ -189,7 +189,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
             onPressed: () => Navigator.of(context).pop(true),
             style: OutlinedButton.styleFrom(
               foregroundColor: ConqueraColors.danger,
-              side: const BorderSide(color: ConqueraColors.danger),
+              side: BorderSide(color: ConqueraColors.danger),
             ),
             child: const Text('Quit'),
           ),
@@ -289,7 +289,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
                             style: ConqueraText.title.copyWith(fontSize: 40),
                           ),
                           const SizedBox(height: ConqueraSpace.md),
-                          const Divider(
+                          Divider(
                             height: 1,
                             thickness: 1,
                             color: ConqueraColors.divider,
@@ -332,7 +332,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
                                 ),
                               ),
                               child: _quitting
-                                  ? const SizedBox(
+                                  ? SizedBox(
                                       width: 18,
                                       height: 18,
                                       child: CircularProgressIndicator(

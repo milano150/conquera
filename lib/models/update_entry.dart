@@ -24,7 +24,7 @@ class TroopRow {
       );
 }
 
-enum UpdateType { attack, build, destroy }
+enum UpdateType { attack, build, destroy, missile }
 
 /// One line of a player's "Updates" feed, stored under
 /// games/{gameId}/players/{uid}/updates/{id}: an attack they did or faced,
@@ -54,6 +54,10 @@ class UpdateEntry {
   final String provinceId;
   final String buildingId;
 
+  /// Missile strikes: power the hit removed ([targetBuilding] is what it
+  /// destroyed, [provinceId] the silo that fired).
+  final double powerRemoved;
+
   const UpdateEntry({
     required this.id,
     required this.type,
@@ -70,6 +74,7 @@ class UpdateEntry {
     this.defenders = const [],
     this.provinceId = '',
     this.buildingId = '',
+    this.powerRemoved = 0,
   });
 
   factory UpdateEntry.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -81,6 +86,7 @@ class UpdateEntry {
     final type = switch (d['type']) {
       'build' => UpdateType.build,
       'destroy' => UpdateType.destroy,
+      'missile' => UpdateType.missile,
       _ => UpdateType.attack,
     };
     return UpdateEntry(
@@ -99,6 +105,7 @@ class UpdateEntry {
       defenders: rows('defenders'),
       provinceId: d['provinceId'] as String? ?? '',
       buildingId: d['buildingId'] as String? ?? '',
+      powerRemoved: (d['powerRemoved'] as num?)?.toDouble() ?? 0,
     );
   }
 }

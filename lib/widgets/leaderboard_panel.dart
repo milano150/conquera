@@ -133,7 +133,7 @@ class _LeaderboardPanelState extends State<LeaderboardPanel> {
                         color: ConqueraColors.accent,
                       ),
                     ),
-                    const Icon(
+                    Icon(
                       Icons.arrow_drop_down,
                       size: 20,
                       color: ConqueraColors.accent,
@@ -144,7 +144,7 @@ class _LeaderboardPanelState extends State<LeaderboardPanel> {
             ],
           ),
         ),
-        const Divider(height: 1, color: ConqueraColors.divider),
+        Divider(height: 1, color: ConqueraColors.divider),
         Expanded(
           child: ListenableBuilder(
             listenable: Listenable.merge([widget.players, widget.provinces]),
