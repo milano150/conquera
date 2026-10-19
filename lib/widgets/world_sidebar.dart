@@ -48,8 +48,12 @@ class WorldSidebar extends StatefulWidget {
   /// Opens the How to play screen.
   final VoidCallback onOpenHowToPlay;
 
+  /// Opens straight onto the Log preview instead of the menu.
+  final bool startOnLog;
+
   const WorldSidebar({
     super.key,
+    this.startOnLog = false,
     required this.open,
     required this.worldId,
     required this.onClose,
@@ -147,6 +151,7 @@ class _WorldSidebarState extends State<WorldSidebar>
                   onOpenUpdates: widget.onOpenUpdates,
                   onOpenLog: widget.onOpenLog,
                   onOpenHowToPlay: widget.onOpenHowToPlay,
+                  startOnLog: widget.startOnLog,
                 ),
               ),
             ),
@@ -167,8 +172,10 @@ class _Panel extends StatefulWidget {
   final VoidCallback onOpenUpdates;
   final VoidCallback onOpenLog;
   final VoidCallback onOpenHowToPlay;
+  final bool startOnLog;
 
   const _Panel({
+    required this.startOnLog,
     required this.worldId,
     required this.players,
     required this.provinces,
@@ -187,7 +194,7 @@ class _Panel extends StatefulWidget {
 enum _View { menu, leaderboard, history, log }
 
 class _PanelState extends State<_Panel> {
-  _View _view = _View.menu;
+  late _View _view = widget.startOnLog ? _View.log : _View.menu;
 
   @override
   Widget build(BuildContext context) {

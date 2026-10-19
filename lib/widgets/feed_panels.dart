@@ -63,10 +63,15 @@ class _Feed<T> extends StatefulWidget {
   final Widget Function(T item) itemBuilder;
   final String empty;
 
+  /// When set, a centred day label (TODAY, YESTERDAY, 14 OCT) with extra
+  /// space above it is shown wherever the day changes.
+  final DateTime? Function(T item)? dateOf;
+
   const _Feed({
     required this.stream,
     required this.itemBuilder,
     required this.empty,
+    this.dateOf,
   });
 
   @override
@@ -134,12 +139,61 @@ class _FeedState<T> extends State<_Feed<T>> {
         ConqueraSpace.sm,
       ),
       itemCount: _items.length,
-      itemBuilder: (_, i) => Padding(
-        padding: const EdgeInsets.only(bottom: 5),
-        child: widget.itemBuilder(_items[i]),
-      ),
+      itemBuilder: (_, i) {
+        final dateOf = widget.dateOf;
+        final at = dateOf?.call(_items[i]);
+        final newDay = dateOf != null &&
+            (i == 0 || _dayKey(at) != _dayKey(dateOf(_items[i - 1])));
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (newDay) _dayHeader(at, first: i == 0),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: widget.itemBuilder(_items[i]),
+            ),
+          ],
+        );
+      },
     );
   }
+}
+
+String _dayKey(DateTime? at) {
+  final t = (at ?? DateTime.now()).toLocal();
+  return '${t.year}-${t.month}-${t.day}';
+}
+
+String _dayLabel(DateTime? at) {
+  final t = (at ?? DateTime.now()).toLocal();
+  final now = DateTime.now();
+  if (_dayKey(at) == _dayKey(now)) return 'TODAY';
+  if (_dayKey(at) == _dayKey(now.subtract(const Duration(days: 1)))) {
+    return 'YESTERDAY';
+  }
+  const months = [
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+  ];
+  final date = '${t.day} ${months[t.month - 1]}';
+  return t.year == now.year ? date : '$date ${t.year}';
+}
+
+/// The centred day label between groups of entries.
+Widget _dayHeader(DateTime? at, {bool first = false}) {
+  return Padding(
+    padding: EdgeInsets.only(top: first ? 4 : 24, bottom: 10),
+    child: Center(
+      child: Text(
+        _dayLabel(at),
+        style: ConqueraText.label.copyWith(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
+        ),
+      ),
+    ),
+  );
 }
 
 Widget _miniLine(Color color, List<InlineSpan> text, DateTime? at) {
@@ -152,7 +206,7 @@ Widget _miniLine(Color color, List<InlineSpan> text, DateTime? at) {
       border: Border.all(color: color),
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -376,6 +430,7 @@ class LogPanel extends StatelessWidget {
           child: _Feed<LogEntry>(
             stream: firestore.watchLog(gameId: gameId, limit: 40),
             itemBuilder: _item,
+            dateOf: (e) => e.at,
             empty: 'Nothing yet. Joins, annexations and battles will show up here.',
           ),
         ),

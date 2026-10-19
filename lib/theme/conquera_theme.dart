@@ -66,7 +66,7 @@ class ConqueraColors {
 
   // Errors and "can't afford" hints.
   static Color get danger =>
-      _p(const Color(0xFF9B2C2C), const Color(0xFFE86F6F), const Color(0xFFFF4D6D));
+      _p(const Color(0xFFC94A4A), const Color(0xFFF28B8B), const Color(0xFFFF7A90));
 
   // Good news (a war you started, an attack you won).
   static Color get success =>

@@ -182,7 +182,7 @@ window.setGold=wrap(async uid=>{const v=prompt('Set gold to:',goldNow(players[ui
 window.addGold=wrap(async(uid,n)=>{await P().doc(uid).update({gold:goldNow(players[uid])+n,goldUpdatedAt:TS()});toast('+'+n+' gold')});
 window.rename=wrap(async uid=>{const v=prompt('New name:',players[uid].displayName);if(v)await P().doc(uid).update({displayName:v})});
 window.recolor=wrap(async uid=>{const v=prompt('New color (hex, e.g. #E63946):',players[uid].colorHex||'#457B9D');if(v===null)return;if(!/^#[0-9a-fA-F]{6}$/.test(v.trim()))return toast('Use #RRGGBB',true);await P().doc(uid).update({colorHex:v.trim().toUpperCase()});toast('Color set')});
-window.resetCd=wrap(async uid=>{const D=firebase.firestore.FieldValue.delete();await P().doc(uid).update({lastAttackAt:D,lastDestroyAt:D});toast('Cooldowns reset')});
+window.resetCd=wrap(async uid=>{const D=firebase.firestore.FieldValue.delete();const b=db.batch();b.update(P().doc(uid),{lastAttackAt:D,lastDestroyAt:D});Object.values(provs).filter(p=>p.ownerId===uid&&p.building&&p.building.lastUsedAt).forEach(p=>b.update(V().doc(p.id),{'building.lastUsedAt':D}));await b.commit();toast('Cooldowns reset')});
 window.recalcOne=wrap(async uid=>{const b=db.batch();applyRecalc(b,uid,provs);await b.commit();toast('Recalculated')});
 window.delPlayer=wrap(async uid=>{if(!confirm('Delete this player and make their provinces neutral?'))return;const b=db.batch();Object.values(provs).filter(p=>p.ownerId===uid).forEach(p=>b.delete(V().doc(p.id)));b.delete(P().doc(uid));await b.commit();toast('Player deleted')});
 function renderTools(bar,body){
@@ -193,7 +193,7 @@ function renderTools(bar,body){
   <div class="card"><b>Recalculate all players</b><p class="mut">Fixes land count, building income and gold rate from the actual provinces.</p><button class="p" onclick="recalcAll().catch(e=>toast(e.message,true))">Recalculate</button></div>
   <div class="card"><b>Neutralize ALL provinces</b><p class="mut">Deletes every province doc. Players stay but own nothing.</p><button class="d" onclick="wipe()">Wipe map…</button></div></div>`;
 }
-window.resetAllCd=wrap(async()=>{const D=firebase.firestore.FieldValue.delete();const b=db.batch();Object.keys(players).forEach(u=>b.update(P().doc(u),{lastAttackAt:D,lastDestroyAt:D}));await b.commit();toast('Cooldowns reset for everyone')});
+window.resetAllCd=wrap(async()=>{const D=firebase.firestore.FieldValue.delete();const b=db.batch();Object.keys(players).forEach(u=>b.update(P().doc(u),{lastAttackAt:D,lastDestroyAt:D}));Object.values(provs).filter(p=>p.building&&p.building.lastUsedAt).forEach(p=>b.update(V().doc(p.id),{'building.lastUsedAt':D}));await b.commit();toast('Cooldowns reset for everyone')});
 window.backup=wrap(async()=>{const ser=o=>JSON.parse(JSON.stringify(o,(k,v)=>v&&typeof v.toDate==='function'?{__ts:v.toDate().toISOString()}:v));
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({world:gid,at:new Date().toISOString(),players:ser(players),provinces:ser(provs)},null,1)],{type:'application/json'}));a.download=`conquera-${gid}-${Date.now()}.json`;a.click();toast('Backup downloaded')});
 window.giveAll=wrap(async()=>{const n=Number($('#gg').value)||0;const b=db.batch();Object.values(players).forEach(p=>b.update(P().doc(p.id),{gold:goldNow(p)+n,goldUpdatedAt:TS()}));await b.commit();toast('Gave '+n+' to everyone')});

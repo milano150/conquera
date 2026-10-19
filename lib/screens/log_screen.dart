@@ -156,7 +156,8 @@ class _LogScreenState extends State<LogScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (prev == null || _day(e.at) != _day(prev.at)) _dayChip(e.at),
+            if (prev == null || _day(e.at) != _day(prev.at))
+              _dayChip(e.at, first: prev == null),
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: _card(e),
@@ -230,7 +231,7 @@ class _LogScreenState extends State<LogScreen> {
             border: Border.all(color: color),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             child: Row(
               children: [
                 Expanded(
@@ -255,11 +256,19 @@ class _LogScreenState extends State<LogScreen> {
     );
   }
 
-  Widget _dayChip(DateTime? at) {
+  Widget _dayChip(DateTime? at, {bool first = false}) {
+    // Extra space above each new day separates the days from one another.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: ConqueraSpace.sm),
+      padding: EdgeInsets.only(top: first ? ConqueraSpace.sm : 32, bottom: 10),
       child: Center(
-        child: Text(_dayLabel(at), style: ConqueraText.label),
+        child: Text(
+          _dayLabel(at).toUpperCase(),
+          style: ConqueraText.label.copyWith(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
       ),
     );
   }
@@ -284,7 +293,8 @@ class _LogScreenState extends State<LogScreen> {
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    return '${t.day} ${months[t.month - 1]}';
+    final date = '${t.day} ${months[t.month - 1]}';
+    return t.year == now.year ? date : '$date ${t.year}';
   }
 
   String _time(DateTime? at) {

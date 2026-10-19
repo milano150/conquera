@@ -54,6 +54,11 @@ class CountryInfoPanel extends StatelessWidget {
   /// as a countdown inside the USE button.
   final DateTime? useReadyAt;
 
+  /// Gold price shown beside the USE icon (null = free / none), and whether
+  /// the player can afford it (false disables the button).
+  final int? useCost;
+  final bool useEnabled;
+
   const CountryInfoPanel({
     super.key,
     required this.name,
@@ -74,6 +79,8 @@ class CountryInfoPanel extends StatelessWidget {
     this.useColor,
     this.onUse,
     this.useReadyAt,
+    this.useCost,
+    this.useEnabled = true,
   });
 
   @override
@@ -176,7 +183,8 @@ class CountryInfoPanel extends StatelessWidget {
                         icon: useIcon!,
                         color: useColor ?? ConqueraColors.ink,
                         readyAt: useReadyAt,
-                        onPressed: onUse,
+                        cost: useCost,
+                        onPressed: useEnabled ? onUse : null,
                       ),
                       const SizedBox(width: ConqueraSpace.sm),
                     ],
@@ -317,12 +325,14 @@ class _UseButton extends StatefulWidget {
   final IconData icon;
   final Color color;
   final DateTime? readyAt;
+  final int? cost;
   final VoidCallback? onPressed;
 
   const _UseButton({
     required this.icon,
     required this.color,
     required this.readyAt,
+    required this.cost,
     required this.onPressed,
   });
 
@@ -379,6 +389,19 @@ class _UseButtonState extends State<_UseButton> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(widget.icon, size: 20),
+          if (left == null && widget.cost != null) ...[
+            const SizedBox(width: 6),
+            GoldAmount(
+              widget.cost!,
+              iconSize: 14,
+              faded: widget.onPressed == null,
+              style: ConqueraText.value.copyWith(
+                color: color,
+                fontSize: 13,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
           if (left != null) ...[
             const SizedBox(width: 6),
             Text(

@@ -11,6 +11,7 @@ import '../config/game_rules.dart';
 import '../services/server_clock.dart';
 import '../models/attack_result.dart';
 import '../models/battle_event.dart';
+import '../models/log_entry.dart';
 import '../models/missile_event.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
@@ -125,6 +126,31 @@ class _MapScreenState extends State<MapScreen>
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
   StreamSubscription<MissileEvent>? _missilesSub;
+
+  // --- Log notification badge --------------------------------------------
+  StreamSubscription<List<LogEntry>>? _logSub;
+  List<LogEntry> _logEntries = const [];
+
+  /// Log entries newer than this haven't been seen yet.
+  DateTime _logSeenAt = ServerClock.now();
+  bool _logOpen = false;
+
+  /// Whether the sidebar was opened onto the Log (the bottom-left button).
+  bool _sidebarLog = false;
+
+  /// The Log is on screen (full screen, or the sidebar preview).
+  bool get _viewingLog => _logOpen || (_sidebarOpen && _sidebarLog);
+
+  /// How many Log entries arrived since the Log was last open.
+  final ValueNotifier<int> _unreadLog = ValueNotifier<int>(0);
+
+  void _recountLog() {
+    _unreadLog.value = _viewingLog
+        ? 0
+        : _logEntries
+            .where((e) => e.at != null && e.at!.isAfter(_logSeenAt))
+            .length;
+  }
   final Set<String> _seenMissileIds = {};
 
   /// Attacks by other players waiting to be played on this map.
@@ -225,7 +251,7 @@ class _MapScreenState extends State<MapScreen>
   ({Offset from, Offset to, Color color})? _missile;
   late final AnimationController _missileCtl = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1300),
+    duration: const Duration(seconds: 10),
   );
 
   /// The pop-up text, 0..1.
@@ -291,6 +317,14 @@ class _MapScreenState extends State<MapScreen>
       _onMissileEvent,
       onError: (Object e) => debugPrint('Missile events stream error: $e'),
     );
+    _logSub = _firestore.watchLog(gameId: widget.gameId).listen(
+      (list) {
+        _logEntries = list;
+        if (_viewingLog) _logSeenAt = ServerClock.now();
+        _recountLog();
+      },
+      onError: (Object e) => debugPrint('Log badge stream error: $e'),
+    );
   }
 
   @override
@@ -299,6 +333,8 @@ class _MapScreenState extends State<MapScreen>
     _playersSub?.cancel();
     _eventsSub?.cancel();
     _missilesSub?.cancel();
+    _logSub?.cancel();
+    _unreadLog.dispose();
     _missileCtl.dispose();
     _provinceStates.dispose();
     _players.dispose();
@@ -1376,7 +1412,6 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     setState(() => _missileSiloId = province.id);
-    _toast('Tap an enemy territory inside the red circle.');
   }
 
   void _cancelMissile() {
@@ -1402,6 +1437,21 @@ class _MapScreenState extends State<MapScreen>
     final dy = target.anchor.dy - silo.anchor.dy;
     final r = fraction * width;
     return dx * dx + dy * dy <= r * r;
+  }
+
+  /// Outlines of the enemy territories the aiming silo can hit.
+  List<Path> _missileTargetPaths() {
+    final siloId = _missileSiloId;
+    if (siloId == null) return const [];
+    final paths = <Path>[];
+    _provinceStates.value.forEach((id, state) {
+      final ownerId = state.ownerId;
+      if (id == siloId || ownerId == null || ownerId == _uid) return;
+      final p = _controller.provinceById(id);
+      if (p == null || !_canSee(id) || !_inMissileRange(siloId, p)) return;
+      paths.add(p.path);
+    });
+    return paths;
   }
 
   /// A tap while aiming: the tapped territory is the target.
@@ -1440,6 +1490,7 @@ class _MapScreenState extends State<MapScreen>
     }
     if (!mounted) return;
     setState(() => _missileSiloId = null);
+    _controller.clearSelection();
     if (error != null) _toast(error);
   }
 
@@ -1463,55 +1514,101 @@ class _MapScreenState extends State<MapScreen>
     if (!mounted) return;
     setState(() => _missile = null);
 
+    if (_battleRunning) return;
     final name = GameRules.buildingById(e.building)?.name;
-    if (name == null || _battleRunning) return;
-    final popup = _Popup(
-      anchor: to,
-      lead: 'Destroyed ',
-      name: name,
-      nameColor: ConqueraColors.danger,
-    );
+    final popup = name != null
+        ? _Popup(
+            anchor: to,
+            lead: 'Destroyed ',
+            name: name,
+            nameColor: ConqueraColors.danger,
+          )
+        : _Popup(
+            anchor: to,
+            lead: 'No building destroyed',
+            name: '',
+            nameColor: ConqueraColors.danger,
+          );
     setState(() => _popup = popup);
     await _popupAnim.forward(from: 0);
     if (mounted && identical(_popup, popup)) setState(() => _popup = null);
   }
 
-  Widget _missileBanner() {
+  /// Opens the sidebar straight onto the Log preview.
+  void _openLogPreview() {
+    setState(() {
+      _sidebarLog = true;
+      _sidebarOpen = true;
+    });
+    _logSeenAt = ServerClock.now();
+    _recountLog();
+  }
+
+  /// Bottom-left shortcut to the Log, with a red count of unseen entries.
+  Widget _logButton() {
     return Positioned(
       left: ConqueraSpace.md,
-      right: ConqueraSpace.md,
       bottom: ConqueraSpace.md + MediaQuery.of(context).padding.bottom,
-      child: IgnorePointer(
-        ignoring: _missileSiloId == null,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 140),
-          opacity: _missileSiloId == null ? 0 : 1,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.only(
-                left: ConqueraSpace.md,
-                right: ConqueraSpace.xs,
+      child: ValueListenableBuilder<int>(
+        valueListenable: _unreadLog,
+        builder: (context, unread, _) => Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Material(
+              color: ConqueraColors.surface,
+              elevation: 2,
+              shadowColor: const Color(0x55000000),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: ConqueraColors.divider),
               ),
-              decoration: BoxDecoration(
-                color: ConqueraColors.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: ConqueraColors.danger, width: 1.5),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.gps_fixed, size: 18, color: ConqueraColors.danger),
-                  const SizedBox(width: ConqueraSpace.sm),
-                  Text('Pick a target in range', style: ConqueraText.value),
-                  const SizedBox(width: ConqueraSpace.sm),
-                  TextButton(
-                    onPressed: _cancelMissile,
-                    child: const Text('Cancel'),
+              child: InkWell(
+                customBorder: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                onTap: _openLogPreview,
+                child: SizedBox(
+                  width: 54,
+                  height: 54,
+                  child: Icon(
+                    Icons.article_outlined,
+                    size: 26,
+                    color: ConqueraColors.ink,
                   ),
-                ],
+                ),
               ),
             ),
-          ),
+            if (unread > 0)
+              Positioned(
+                top: -6,
+                right: -6,
+                child: IgnorePointer(
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 21),
+                    height: 21,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: ConqueraColors.danger,
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(
+                        color: ConqueraColors.surface,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Text(
+                      unread > 99 ? '99+' : '$unread',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -1675,7 +1772,11 @@ class _MapScreenState extends State<MapScreen>
   /// Opens the world Log (joins, annexations, battles, eliminations).
   void _openLog() {
     setState(() => _sidebarOpen = false);
-    Navigator.of(context).push(
+    _logOpen = true;
+    _logSeenAt = ServerClock.now();
+    _recountLog();
+    Navigator.of(context)
+        .push(
       PageRouteBuilder<void>(
         transitionDuration: const Duration(milliseconds: 320),
         reverseTransitionDuration: const Duration(milliseconds: 260),
@@ -1704,7 +1805,12 @@ class _MapScreenState extends State<MapScreen>
           players: _players,
         ),
       ),
-    );
+    )
+        .then((_) {
+      _logOpen = false;
+      _logSeenAt = ServerClock.now();
+      _recountLog();
+    });
   }
 
   /// Opens the How to play screen.
@@ -1727,7 +1833,10 @@ class _MapScreenState extends State<MapScreen>
             appBar: PlayerTopBar(
               gameId: widget.gameId,
               uid: _uid,
-              onMenuPressed: () => setState(() => _sidebarOpen = true),
+              onMenuPressed: () => setState(() {
+                _sidebarLog = false;
+                _sidebarOpen = true;
+              }),
             ),
             body: ListenableBuilder(
               listenable: Listenable.merge([_controller, _provinceStates, _players]),
@@ -1873,6 +1982,24 @@ class _MapScreenState extends State<MapScreen>
                                         ),
                                       ),
                                     ),
+                                    if (_missileSiloId != null)
+                                      IgnorePointer(
+                                        child: RepaintBoundary(
+                                          child: AnimatedBuilder(
+                                            animation: _transform,
+                                            builder: (context, _) => CustomPaint(
+                                              size: sceneSize,
+                                              painter: TargetPainter(
+                                                paths: _missileTargetPaths(),
+                                                scale: _transform.value
+                                                    .getMaxScaleOnAxis(),
+                                                color: ConqueraColors.danger,
+                                                wrapWidth: mapSize.width,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     if (_missile != null)
                                       IgnorePointer(
                                         child: RepaintBoundary(
@@ -1885,6 +2012,8 @@ class _MapScreenState extends State<MapScreen>
                                                 to: _missile!.to,
                                                 color: _missile!.color,
                                                 progress: _missileCtl.value,
+                                                iconSize:
+                                                    _iconPxAtMinZoom / minScale,
                                                 wrapWidth: mapSize.width,
                                               ),
                                             ),
@@ -1925,7 +2054,7 @@ class _MapScreenState extends State<MapScreen>
                         ),
                       ),
                     _attackAlert(),
-                    _missileBanner(),
+                    _logButton(),
                     Positioned(
                       top: 0,
                       left: 0,
@@ -1934,7 +2063,7 @@ class _MapScreenState extends State<MapScreen>
                         duration: const Duration(milliseconds: 160),
                         curve: Curves.easeOut,
                         alignment: Alignment.topCenter,
-                        child: selected == null
+                        child: selected == null || _missileSiloId != null
                             ? const SizedBox(width: double.infinity)
                             : CountryInfoPanel(
                                 name: selected.name,
@@ -1965,6 +2094,17 @@ class _MapScreenState extends State<MapScreen>
                                     : null,
                                 useColor: ConqueraColors.danger,
                                 useReadyAt: selectedState?.missileReadyAt,
+                                useCost: GameRules.missileRadiusOf(
+                                          selectedState?.buildingType ?? '',
+                                        ) >
+                                        0
+                                    ? GameRules.missileCost
+                                    : null,
+                                useEnabled:
+                                    (_players.value[_uid]
+                                            ?.goldAt(ServerClock.now()) ??
+                                        0) >=
+                                    GameRules.missileCost,
                                 onUse: () => _useBuilding(selected, selectedState),
                               ),
                       ),
@@ -1976,6 +2116,7 @@ class _MapScreenState extends State<MapScreen>
           ),
           WorldSidebar(
             open: _sidebarOpen,
+            startOnLog: _sidebarLog,
             worldId: widget.gameId,
             onClose: () => setState(() => _sidebarOpen = false),
             players: _players,

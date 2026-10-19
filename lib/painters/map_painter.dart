@@ -193,6 +193,51 @@ class SelectionPainter extends CustomPainter {
         oldDelegate.wrapWidth != wrapWidth;
   }
 }
+/// Outlines the territories a missile can hit, in [color], at a constant
+/// on-screen thickness.
+class TargetPainter extends CustomPainter {
+  final List<Path> paths;
+  final double scale;
+  final Color color;
+  final double wrapWidth;
+
+  TargetPainter({
+    required this.paths,
+    required this.scale,
+    required this.color,
+    this.wrapWidth = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (paths.isEmpty || scale <= 0) return;
+    Paint line(Color c, double px) => Paint()
+      ..style = PaintingStyle.stroke
+      ..isAntiAlias = true
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round
+      ..color = c
+      ..strokeWidth = px / scale;
+    final copies = wrapWidth > 0 ? 2 : 1;
+    for (var i = 0; i < copies; i++) {
+      canvas.save();
+      canvas.translate(i * wrapWidth, 0);
+      for (final p in paths) {
+        canvas.drawPath(p, line(ConqueraColors.ink, 3.6));
+        canvas.drawPath(p, line(color, 2));
+      }
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant TargetPainter old) =>
+      !listEquals(old.paths, paths) ||
+      old.scale != scale ||
+      old.color != color ||
+      old.wrapWidth != wrapWidth;
+}
+
 /// 0..1 opacity as a 0..255 alpha.
 int _alpha(double opacity) => min(255, max(0, (opacity * 255).round()));
 
@@ -653,15 +698,20 @@ class BadgePainter extends CustomPainter {
   }
 }
 
-/// Darkens everything outside the radars' ranges. Nothing is drawn at
-/// [progress] 0; at 1 the whole map is dimmed except a sharp-edged circle for
-/// each entry of [circles] (centre, radius). The circles are cut out of the
-/// dim layer for every copy of the world, so they wrap around the map edge.
+/// Two looks, depending on [edgeColor]:
+///
+///  * null (a radar): the whole map is dimmed except a sharp-edged circle for
+///    each entry of [circles] (centre, radius). Nothing is drawn at
+///    [progress] 0; the circles open up while the map dims.
+///  * set (a missile silo): no dimming and no tint. Just a glowing ring in
+///    [edgeColor] that grows outward from each centre to its full radius.
+///
+/// Circles are drawn for every copy of the world, so they wrap around the
+/// map edge.
 class RadarPainter extends CustomPainter {
   final List<(Offset, double)> circles;
 
-  /// When set, each circle also gets a glowing edge in this color (a
-  /// missile silo's range is red).
+  /// When set, the ring look is used (a missile silo's range is red).
   final Color? edgeColor;
 
   /// 0..1, already eased.
@@ -680,15 +730,40 @@ class RadarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (circles.isEmpty || progress <= 0) return;
+    final offsets = wrapWidth > 0 ? [0.0, wrapWidth, wrapWidth * 2] : [0.0];
 
-    // The circles open up while the map dims.
+    final edge = edgeColor;
+    if (edge != null) {
+      // Missile range: a ring growing from the centre outward.
+      for (final (c, full) in circles) {
+        if (full <= 0) continue;
+        final radius = full * progress;
+        for (final dx in offsets) {
+          final center = Offset(c.dx + dx, c.dy);
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..isAntiAlias = true
+              ..strokeWidth = full * 0.012
+              ..color = edge.withAlpha((255 * progress).round()),
+          );
+        }
+      }
+      return;
+    }
+
+    // Radar: dim everything outside the circles.
     final grow = 1 + (1 - progress) * 0.6;
-    canvas.saveLayer(Offset.zero & size, Paint());
+    // Dim well past the scene too, so the sea strip below / beside the map
+    // (inside the viewport) is darkened as well.
+    final area = (Offset.zero & size).inflate(size.longestSide * 4);
+    canvas.saveLayer(area, Paint());
     canvas.drawRect(
-      Offset.zero & size,
+      area,
       Paint()..color = Colors.black.withAlpha((_dimAlpha * progress).round()),
     );
-    final offsets = wrapWidth > 0 ? [0.0, wrapWidth, wrapWidth * 2] : [0.0];
     final hole = Paint()
       ..blendMode = BlendMode.dstOut
       ..isAntiAlias = true
@@ -700,33 +775,6 @@ class RadarPainter extends CustomPainter {
       }
     }
     canvas.restore();
-
-    final edge = edgeColor;
-    if (edge == null) return;
-    for (final (c, radius) in circles) {
-      if (radius <= 0) continue;
-      for (final dx in offsets) {
-        final center = Offset(c.dx + dx, c.dy);
-        canvas.drawCircle(
-          center,
-          radius * grow,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = radius * 0.05
-            ..color = edge.withAlpha((110 * progress).round())
-            ..maskFilter = MaskFilter.blur(BlurStyle.normal, radius * 0.03),
-        );
-        canvas.drawCircle(
-          center,
-          radius * grow,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..isAntiAlias = true
-            ..strokeWidth = radius * 0.012
-            ..color = edge.withAlpha((255 * progress).round()),
-        );
-      }
-    }
   }
 
   @override
@@ -746,11 +794,15 @@ class MissilePainter extends CustomPainter {
   final double progress;
   final double wrapWidth;
 
+  /// Length of the missile in map units (same as a building icon).
+  final double iconSize;
+
   MissilePainter({
     required this.from,
     required this.to,
     required this.color,
     required this.progress,
+    required this.iconSize,
     this.wrapWidth = 0,
   });
 
@@ -771,7 +823,7 @@ class MissilePainter extends CustomPainter {
       Curves.easeIn.transform(progress.clamp(0.0, 1.0).toDouble()),
     )!;
     final angle = (end - from).direction;
-    final unit = (wrapWidth > 0 ? wrapWidth : 1000) * 0.006;
+    final unit = iconSize / 4;
 
     final shape = Path()
       ..moveTo(unit * 2, 0)
@@ -807,5 +859,6 @@ class MissilePainter extends CustomPainter {
       old.from != from ||
       old.to != to ||
       old.color != color ||
+      old.iconSize != iconSize ||
       old.wrapWidth != wrapWidth;
 }
