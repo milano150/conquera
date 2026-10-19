@@ -184,12 +184,18 @@ class FirestoreService {
   /// market earns for every bordering territory its owner holds; that count
   /// is kept as 'trades' on the building and updated by [_shiftTrades]
   /// whenever a bordering province changes hands.
-  double _buildingIncomeOf(Map<String, dynamic>? provinceData) {
+  double _buildingIncomeOf(
+    Map<String, dynamic>? provinceData,
+    String provinceId,
+  ) {
     final building = provinceData?['building'];
     if (building is! Map) return 0;
     final def = GameRules.buildingById(building['type'] as String? ?? '');
     if (def == null) return 0;
-    return def.incomeFor((building['trades'] as num?)?.toInt() ?? 0);
+    return def.incomeFor(
+      (building['trades'] as num?)?.toInt() ?? 0,
+      provinceId,
+    );
   }
 
   /// A province just changed hands from [fromOwner] (null = nobody) to
@@ -217,10 +223,10 @@ class FirestoreService {
       final trades = (building['trades'] as num?)?.toInt() ?? 0;
       if (owner == toOwner) {
         tx.update(snap.reference, {'building.trades': trades + 1});
-        gain += def.goldPerPartnerPerSec;
+        gain += def.partnerRateFor(snap.id);
       } else if (fromOwner != null && owner == fromOwner && trades > 0) {
         tx.update(snap.reference, {'building.trades': trades - 1});
-        loss += def.goldPerPartnerPerSec;
+        loss += def.partnerRateFor(snap.id);
       }
     }
     return (gain: gain, loss: loss);
@@ -344,7 +350,7 @@ class FirestoreService {
       final previousOwnerId = provinceData?['ownerId'] as String?;
       if (previousOwnerId == uid) return; // already yours
 
-      final incomeDelta = _buildingIncomeOf(provinceData);
+      final incomeDelta = _buildingIncomeOf(provinceData, provinceId);
 
       final newOwnerSnap = await tx.get(newOwnerRef);
       DocumentReference<Map<String, dynamic>>? previousOwnerRef;
@@ -472,7 +478,7 @@ class FirestoreService {
       final trades = neighborSnaps
           .where((snap) => snap.exists && snap.data()?['ownerId'] == uid)
           .length;
-      final addedIncome = building.incomeFor(trades);
+      final addedIncome = building.incomeFor(trades, provinceId);
 
       tx.update(provinceRef, {
         'building': {
@@ -530,7 +536,7 @@ class FirestoreService {
         return 'There is nothing to destroy here.';
       }
 
-      final removedIncome = _buildingIncomeOf(data);
+      final removedIncome = _buildingIncomeOf(data, provinceId);
 
       tx.update(provinceRef, {
         'building': {'type': 'none', 'level': 0},
@@ -612,7 +618,7 @@ class FirestoreService {
       final troops = (target?['troops'] as num?)?.toDouble() ?? 0;
       final reduced = troops - GameRules.missilePowerDamage;
       final left = troops <= 1 ? troops : (reduced < 1 ? 1.0 : reduced);
-      final removedIncome = _buildingIncomeOf(target);
+      final removedIncome = _buildingIncomeOf(target, targetId);
 
       tx.update(siloRef, {'building.lastUsedAt': Timestamp.fromDate(now)});
       tx.update(targetRef, {
@@ -930,7 +936,7 @@ class FirestoreService {
         // The building does not survive the invasion. Its income is
         // therefore lost by the defender and never gained by the attacker.
         final hadBuilding = _buildingTypeOf(targetData) != 'none';
-        final incomeDelta = _buildingIncomeOf(targetData);
+        final incomeDelta = _buildingIncomeOf(targetData, targetId);
         // Markets next door: the attacker's trade with one more territory,
         // the defender's with one fewer.
         final shift = _shiftTrades(
@@ -953,6 +959,13 @@ class FirestoreService {
             now: now,
           ),
           'lastAttackAt': attackedAt,
+          // Leaderboard: one more battle won, and a kill if this took the
+          // defender's last territory.
+          'victories': FieldValue.increment(1),
+          if (defenderSnap != null &&
+              defenderSnap.exists &&
+              _ownedCount(defenderSnap) - 1 <= 0)
+            'kills': FieldValue.increment(1),
         });
         if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
           tx.update(
@@ -1026,6 +1039,10 @@ class FirestoreService {
           'target': true,
         });
         tx.update(attackerRef, {'lastAttackAt': attackedAt});
+        // The defender held: that is a victory for them too.
+        if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
+          tx.update(defenderRef, {'victories': FieldValue.increment(1)});
+        }
 
         result = AttackResult(
           won: false,
@@ -1226,7 +1243,9 @@ class FirestoreService {
           playerSnap,
           owned: _ownedCount(playerSnap) + 1,
           buildingIncome:
-              _buildingIncome(playerSnap) + _buildingIncomeOf(data) + shift.gain,
+              _buildingIncome(playerSnap) +
+                  _buildingIncomeOf(data, provinceId) +
+                  shift.gain,
           now: now,
           spend: cost.toDouble(),
         ),
@@ -1284,11 +1303,11 @@ class FirestoreService {
             batch.update(doc.reference, {'building.trades': trades});
             tradeFixes++;
           }
-          income += def.incomeFor(trades);
+          income += def.incomeFor(trades, doc.id);
           continue;
         }
       }
-      income += _buildingIncomeOf(docData);
+      income += _buildingIncomeOf(docData, doc.id);
     }
     if (tradeFixes > 0) await batch.commit();
 

@@ -21,6 +21,8 @@ import '../screens/how_to_play_screen.dart';
 import '../services/spawn_candidates.dart';
 import '../widgets/death_overlay.dart';
 import '../screens/log_screen.dart';
+import '../screens/income_screen.dart';
+import '../screens/profile_screen.dart';
 import '../screens/updates_screen.dart';
 import '../services/firestore_service.dart';
 import '../state/map_controller.dart';
@@ -1448,7 +1450,7 @@ class _MapScreenState extends State<MapScreen>
       final ownerId = state.ownerId;
       if (id == siloId || ownerId == null || ownerId == _uid) return;
       final p = _controller.provinceById(id);
-      if (p == null || !_canSee(id) || !_inMissileRange(siloId, p)) return;
+      if (p == null || !_inMissileRange(siloId, p)) return;
       paths.add(p.path);
     });
     return paths;
@@ -1532,6 +1534,36 @@ class _MapScreenState extends State<MapScreen>
     setState(() => _popup = popup);
     await _popupAnim.forward(from: 0);
     if (mounted && identical(_popup, popup)) setState(() => _popup = null);
+  }
+
+  /// Opens the income breakdown (the gold readout in the top bar).
+  void _openIncome() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => IncomeScreen(
+          uid: _uid,
+          players: _players,
+          provinces: _provinceStates,
+          provinceNames: _provinceNames,
+          neighborsOf: _controller.neighborsOf,
+        ),
+      ),
+    );
+  }
+
+  /// Opens the player's profile (the player in the middle of the top bar).
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfileScreen(
+          uid: _uid,
+          players: _players,
+          provinces: _provinceStates,
+          provinceNames: _provinceNames,
+          totalTerritories: _controller.provinces.length,
+        ),
+      ),
+    );
   }
 
   /// Opens the sidebar straight onto the Log preview.
@@ -1833,6 +1865,8 @@ class _MapScreenState extends State<MapScreen>
             appBar: PlayerTopBar(
               gameId: widget.gameId,
               uid: _uid,
+              onProfilePressed: _openProfile,
+              onGoldPressed: _openIncome,
               onMenuPressed: () => setState(() {
                 _sidebarLog = false;
                 _sidebarOpen = true;
@@ -1857,7 +1891,12 @@ class _MapScreenState extends State<MapScreen>
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final selected = _controller.selectedProvince;
+                // While aiming a missile the panel keeps showing the silo.
+                final aimId = _missileSiloId;
+                final selected = (aimId == null
+                        ? null
+                        : _controller.provinceById(aimId)) ??
+                    _controller.selectedProvince;
                 final selectedState =
                     selected == null ? null : _provinceStates.value[selected.id];
                 final selectedOwner = _players.value[selectedState?.ownerId];
@@ -2027,7 +2066,7 @@ class _MapScreenState extends State<MapScreen>
                                           builder: (context, _) => CustomPaint(
                                             size: sceneSize,
                                             painter: SelectionPainter(
-                                              path: selected?.path,
+                                              path: _controller.selectedProvince?.path,
                                               scale: _transform.value
                                                   .getMaxScaleOnAxis(),
                                               wrapWidth: mapSize.width,
@@ -2063,7 +2102,7 @@ class _MapScreenState extends State<MapScreen>
                         duration: const Duration(milliseconds: 160),
                         curve: Curves.easeOut,
                         alignment: Alignment.topCenter,
-                        child: selected == null || _missileSiloId != null
+                        child: selected == null
                             ? const SizedBox(width: double.infinity)
                             : CountryInfoPanel(
                                 name: selected.name,
@@ -2106,6 +2145,8 @@ class _MapScreenState extends State<MapScreen>
                                         0) >=
                                     GameRules.missileCost,
                                 onUse: () => _useBuilding(selected, selectedState),
+                                useCancel: _missileSiloId != null,
+                                onUseCancel: _cancelMissile,
                               ),
                       ),
                     ),

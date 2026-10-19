@@ -59,6 +59,11 @@ class CountryInfoPanel extends StatelessWidget {
   final int? useCost;
   final bool useEnabled;
 
+  /// While a missile is being aimed the USE button turns into a red X that
+  /// calls [onUseCancel].
+  final bool useCancel;
+  final VoidCallback? onUseCancel;
+
   const CountryInfoPanel({
     super.key,
     required this.name,
@@ -81,6 +86,8 @@ class CountryInfoPanel extends StatelessWidget {
     this.useReadyAt,
     this.useCost,
     this.useEnabled = true,
+    this.useCancel = false,
+    this.onUseCancel,
   });
 
   @override
@@ -180,11 +187,12 @@ class CountryInfoPanel extends StatelessWidget {
                   else ...[
                     if (useIcon != null) ...[
                       _UseButton(
-                        icon: useIcon!,
+                        icon: useCancel ? Icons.close : useIcon!,
                         color: useColor ?? ConqueraColors.ink,
-                        readyAt: useReadyAt,
-                        cost: useCost,
-                        onPressed: useEnabled ? onUse : null,
+                        readyAt: useCancel ? null : useReadyAt,
+                        cost: useCancel ? null : useCost,
+                        onPressed:
+                            useCancel ? onUseCancel : (useEnabled ? onUse : null),
                       ),
                       const SizedBox(width: ConqueraSpace.sm),
                     ],

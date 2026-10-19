@@ -372,7 +372,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   _LockedField(text: province.buildingLabel),
                   const SizedBox(height: ConqueraSpace.sm),
                   _ActionRow(
-                    info: def?.effectLabelFor(partners) ?? '',
+                    info: def?.effectLabelFor(partners, widget.provinceId) ?? '',
                     unaffordable: false,
                     button: OutlinedButton(
                       onPressed:
@@ -423,7 +423,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                 _ActionRow(
                   info: pending == null
                       ? (cooling ? 'Cooling down' : '')
-                      : pending.effectLabelFor(partners),
+                      : pending.effectLabelFor(partners, widget.provinceId),
                   unaffordable: unaffordable,
                   button: FilledButton(
                     onPressed: canBuild ? _build : null,
@@ -943,7 +943,7 @@ class _BuildingPicker extends StatelessWidget {
               onTap: () => Navigator.of(context).pop(b),
               onInfo: () => showDialog<void>(
                 context: context,
-                builder: (_) => _BuildingInfoDialog(building: b),
+                builder: (_) => _BuildingInfoDialog(building: b, provinceId: provinceId),
               ),
             ),
         ],
@@ -1047,12 +1047,19 @@ class _BuildingTile extends StatelessWidget {
 /// Detail box opened by a tile's info icon.
 class _BuildingInfoDialog extends StatelessWidget {
   final BuildingDef building;
+  final String? provinceId;
 
-  const _BuildingInfoDialog({required this.building});
+  const _BuildingInfoDialog({required this.building, this.provinceId});
 
   String get _where => switch (building.site) {
         BuildSite.coastal => 'Coastal territories',
         BuildSite.archipelago => 'Island territories',
+        BuildSite.producer => switch (building.id) {
+          'diamond_mine' => 'Diamond-mining territories',
+          'uranium_mine' => 'Uranium-mining territories',
+          'silver_mine' => 'Silver-mining territories',
+          _ => 'Mainland oil producers',
+        },
         BuildSite.anywhere =>
           building.tradesWithNeighbors ? 'Needs a neighbor' : 'Anywhere',
       };
@@ -1111,7 +1118,7 @@ class _BuildingInfoDialog extends StatelessWidget {
               _row('Cost', GoldAmount(building.cost, style: ConqueraText.value)),
               _row(
                 'Effect',
-                Text(building.effectLabelFor(0), style: ConqueraText.value),
+                Text(building.effectLabelFor(0, provinceId), style: ConqueraText.value),
               ),
               _row('Where', Text(_where, style: ConqueraText.value)),
             ],

@@ -22,8 +22,16 @@ class PlayerTopBar extends StatefulWidget implements PreferredSizeWidget {
   /// The menu (three lines) button was tapped.
   final VoidCallback onMenuPressed;
 
+  /// The player in the middle of the bar was tapped (opens the profile).
+  final VoidCallback? onProfilePressed;
+
+  /// The gold readout on the right was tapped (opens the income screen).
+  final VoidCallback? onGoldPressed;
+
   const PlayerTopBar({
     super.key,
+    this.onProfilePressed,
+    this.onGoldPressed,
     required this.gameId,
     required this.uid,
     required this.onMenuPressed,
@@ -90,20 +98,40 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
                         ),
                       ),
                     ),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 160),
-                      child: PlayerTag(
-                        name: player?.displayName ?? '...',
-                        color: player?.color,
-                        square: true,
+                    InkWell(
+                      onTap: widget.onProfilePressed,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 160),
+                          child: PlayerTag(
+                            name: player?.displayName ?? '...',
+                            color: player?.color,
+                            square: true,
+                          ),
+                        ),
                       ),
                     ),
                     Expanded(
                       child: Align(
                         alignment: Alignment.centerRight,
-                        child: _GoldReadout(
-                          gold: player?.goldAt(ServerClock.now()),
-                          rate: player?.goldRate,
+                        child: InkWell(
+                          onTap: widget.onGoldPressed,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 8,
+                            ),
+                            child: _GoldReadout(
+                              gold: player?.goldAt(ServerClock.now()),
+                              rate: player?.goldRate,
+                            ),
+                          ),
                         ),
                       ),
                     ),

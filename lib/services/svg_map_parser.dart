@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_drawing/path_drawing.dart';
 import 'package:xml/xml.dart';
 
+import '../config/territory_names.dart';
 import '../models/province.dart';
 import 'map_parse_result.dart';
 
@@ -120,7 +121,8 @@ class SvgMapParser {
           (cssClass != null ? _classOnlyCountryToIsoCode[cssClass] : null) ??
           cssClass ??
           'region_${unnamedCounter++}';
-      final displayName = nameAttr ?? cssClass ?? key;
+      final displayName =
+          TerritoryNames.of(key, nameAttr ?? cssClass ?? key);
 
       Path shape = parseSvgPathData(d);
       shape = _smoothPath(shape);

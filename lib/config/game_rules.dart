@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'building_overrides.dart';
 import 'territory_types.dart';
 
 /// Shows up to 3 decimals without trailing zeros (0.06, 0.15, 12).
@@ -22,6 +23,10 @@ enum BuildSite {
 
   /// Island archipelagos only.
   archipelago,
+
+  /// Only territories that a rule in building_overrides.dart explicitly
+  /// allows (oil fields, diamond mines).
+  producer,
 }
 
 /// A building a province can hold (one per province for now).
@@ -101,20 +106,27 @@ class BuildingDef {
 
   /// Gold per second this building makes when it trades with [partners]
   /// bordering territories of its owner.
-  double incomeFor(int partners) =>
-      goldPerSec + goldPerPartnerPerSec * (partners < 0 ? 0 : partners);
+  /// [provinceId] applies that territory's rate from building_overrides.dart.
+  double incomeFor(int partners, [String? provinceId]) =>
+      (goldPerSec + goldPerPartnerPerSec * (partners < 0 ? 0 : partners)) *
+      BuildingOverrides.rateOf(id, provinceId);
+
+  /// Gold/sec gained per trading neighbor in [provinceId].
+  double partnerRateFor(String? provinceId) =>
+      goldPerPartnerPerSec * BuildingOverrides.rateOf(id, provinceId);
 
   /// Description for a province whose owner holds [partners] of its
   /// bordering territories.
-  String effectLabelFor(int partners) {
+  String effectLabelFor(int partners, [String? provinceId]) {
     if (effect != null) return effect!;
+    final rate = BuildingOverrides.rateOf(id, provinceId);
     if (tradesWithNeighbors) {
       if (partners <= 0) {
-        return '+${_trim(goldPerPartnerPerSec * 60)} gold/min per neighbor';
+        return '+${_trim(goldPerPartnerPerSec * rate * 60)} gold/min per neighbor';
       }
-      return '+${_trim(incomeFor(partners) * 60)} gold/min';
+      return '+${_trim(incomeFor(partners, provinceId) * 60)} gold/min';
     }
-    return '+${_trim(goldPerSec * 60)} gold/min';
+    return '+${_trim(goldPerSec * rate * 60)} gold/min';
   }
 }
 
@@ -149,6 +161,9 @@ class GameRules {
   //   mine     0.0010 /s =  3.6 /hr   cost 16  -> pays back in ~4.4 h
   //   harbor   0.0015 /s =  5.4 /hr   cost 24  -> ~4.4 h
   //   rig      0.0025 /s =  9.0 /hr   cost 40  -> ~4.4 h
+  //   diamond  0.0040 /s = 14.4 /hr   cost 64  -> ~4.4 h
+  //   uranium  0.0035 /s = 12.6 /hr   cost 56  -> ~4.4 h
+  //   silver   0.0020 /s =  7.2 /hr   cost 32  -> ~4.4 h
   //   market   0.0003 /s =  1.08 /hr per bordering territory you own,
   //            cost 20 -> ~4.6 h with 4 partners (slower with fewer)
   //
@@ -201,7 +216,7 @@ class GameRules {
     cost: 16,
     goldPerSec: 0.001,
     details: 'Produces gold for you around the clock. Can be built in any '
-        'territory.',
+        'territory; gold-rich territories pay more.',
   );
 
   /// Coastal territories only.
@@ -213,7 +228,8 @@ class GameRules {
     goldPerSec: 0.0015,
     site: BuildSite.coastal,
     details: 'Fishing income for territories with a coast. Landlocked '
-        'territories cannot build it.',
+        'territories cannot build it. Territories with bigger fish catches '
+        'pay more.',
   );
 
   /// Island archipelagos only.
@@ -225,7 +241,55 @@ class GameRules {
     goldPerSec: 0.0025,
     site: BuildSite.archipelago,
     details: 'The best gold income, but only island territories can build '
-        'it.',
+        'it. Islands with more oil pay more.',
+  );
+
+  /// Mainland oil producers only.
+  static const BuildingDef oilField = BuildingDef(
+    id: 'oil_field',
+    name: 'Oil field',
+    icon: Icons.local_gas_station,
+    cost: 40,
+    goldPerSec: 0.0025,
+    site: BuildSite.producer,
+    details: 'Same income as an offshore rig, built on the mainland. Only '
+        'oil-producing territories can build it, and richer oil pays more.',
+  );
+
+  /// Diamond-producing territories only.
+  static const BuildingDef diamondMine = BuildingDef(
+    id: 'diamond_mine',
+    name: 'Diamond mine',
+    icon: Icons.diamond,
+    cost: 64,
+    goldPerSec: 0.004,
+    site: BuildSite.producer,
+    details: 'The richest single income. Only territories that really mine '
+        'diamonds can build it, and bigger diamond output pays more.',
+  );
+
+  /// Uranium-producing territories only.
+  static const BuildingDef uraniumMine = BuildingDef(
+    id: 'uranium_mine',
+    name: 'Uranium mine',
+    icon: Icons.bolt,
+    cost: 56,
+    goldPerSec: 0.0035,
+    site: BuildSite.producer,
+    details: 'High income from nuclear fuel. Only territories that really '
+        'mine uranium can build it, and bigger output pays more.',
+  );
+
+  /// Silver-producing territories only.
+  static const BuildingDef silverMine = BuildingDef(
+    id: 'silver_mine',
+    name: 'Silver mine',
+    icon: Icons.toll,
+    cost: 32,
+    goldPerSec: 0.002,
+    site: BuildSite.producer,
+    details: 'Steady income from silver. Only territories that really mine '
+        'silver can build it, and bigger output pays more.',
   );
 
   /// Earns for every bordering territory its owner holds.
@@ -325,6 +389,10 @@ class GameRules {
     market,
     fishingHarbor,
     offshoreRig,
+    oilField,
+    diamondMine,
+    uraniumMine,
+    silverMine,
     fortress,
     wall,
     watchtower,
@@ -341,13 +409,19 @@ class GameRules {
     String provinceId, {
     required int neighbors,
   }) {
-    switch (building.site) {
-      case BuildSite.anywhere:
-        break;
-      case BuildSite.coastal:
-        if (!TerritoryTypes.isCoastal(provinceId)) return false;
-      case BuildSite.archipelago:
-        if (!TerritoryTypes.isIslandArchipelago(provinceId)) return false;
+    final forced = BuildingOverrides.allowedOf(building.id, provinceId);
+    if (forced == false) return false;
+    if (forced != true) {
+      switch (building.site) {
+        case BuildSite.anywhere:
+          break;
+        case BuildSite.coastal:
+          if (!TerritoryTypes.isCoastal(provinceId)) return false;
+        case BuildSite.archipelago:
+          if (!TerritoryTypes.isIslandArchipelago(provinceId)) return false;
+        case BuildSite.producer:
+          return false; // only a rule with allowed: true opens it
+      }
     }
     if (building.tradesWithNeighbors && neighbors <= 0) return false;
     return true;

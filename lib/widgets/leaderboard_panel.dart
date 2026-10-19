@@ -11,7 +11,9 @@ import 'player_tag.dart';
 
 enum LeaderboardSort {
   power('Total power'),
-  size('Country size');
+  size('Country size'),
+  victories('Victories'),
+  kills('Kills');
 
   final String label;
   const LeaderboardSort(this.label);
@@ -26,7 +28,8 @@ class _Entry {
 }
 
 /// Every player in the world, ranked. Sorted by total power by default, or
-/// by empire size (combined area of the countries they own).
+/// by empire size (combined area of the countries they own), battles won
+/// (victories) or players eliminated (kills).
 class LeaderboardPanel extends StatefulWidget {
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
@@ -67,7 +70,12 @@ class _LeaderboardPanelState extends State<LeaderboardPanel> {
         ),
     ];
 
-    int value(_Entry e) => _sort == LeaderboardSort.power ? e.power : e.area;
+    int value(_Entry e) => switch (_sort) {
+          LeaderboardSort.power => e.power,
+          LeaderboardSort.size => e.area,
+          LeaderboardSort.victories => e.player.victories,
+          LeaderboardSort.kills => e.player.kills,
+        };
     entries.sort((a, b) {
       final byValue = value(b).compareTo(value(a));
       return byValue != 0
@@ -187,9 +195,12 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final value = sort == LeaderboardSort.power
-        ? _group(entry.power)
-        : _area(entry.area);
+    final value = switch (sort) {
+      LeaderboardSort.power => _group(entry.power),
+      LeaderboardSort.size => _area(entry.area),
+      LeaderboardSort.victories => _group(entry.player.victories),
+      LeaderboardSort.kills => _group(entry.player.kills),
+    };
 
     return Container(
       color: isMe ? ConqueraColors.ink.withAlpha(14) : null,

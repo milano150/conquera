@@ -23,6 +23,12 @@ class PlayerState {
   /// When this player last destroyed a building (null = never).
   final DateTime? lastDestroyAt;
 
+  /// Battles won, attacking and defending (leaderboard).
+  final int victories;
+
+  /// Players this one has eliminated from the game (leaderboard).
+  final int kills;
+
   const PlayerState({
     required this.uid,
     required this.displayName,
@@ -32,6 +38,8 @@ class PlayerState {
     required this.goldUpdatedAt,
     this.lastAttackAt,
     this.lastDestroyAt,
+    this.victories = 0,
+    this.kills = 0,
   });
 
   factory PlayerState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -49,6 +57,8 @@ class PlayerState {
       goldUpdatedAt: updated is Timestamp ? updated.toDate() : null,
       lastAttackAt: lastAttack is Timestamp ? lastAttack.toDate() : null,
       lastDestroyAt: lastDestroy is Timestamp ? lastDestroy.toDate() : null,
+      victories: (data['victories'] as num?)?.toInt() ?? 0,
+      kills: (data['kills'] as num?)?.toInt() ?? 0,
     );
   }
 
