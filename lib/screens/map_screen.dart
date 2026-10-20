@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../config/dev_session.dart';
 import '../config/saved_world.dart';
 import '../config/game_rules.dart';
+import '../config/territory_types.dart';
 import '../services/server_clock.dart';
 import '../models/attack_result.dart';
 import '../models/battle_event.dart';
@@ -133,8 +135,28 @@ class _MapScreenState extends State<MapScreen>
   StreamSubscription<List<LogEntry>>? _logSub;
   List<LogEntry> _logEntries = const [];
 
-  /// Log entries newer than this haven't been seen yet.
-  DateTime _logSeenAt = ServerClock.now();
+  /// Log entries newer than this haven't been seen yet. Null until loaded
+  /// from disk; saved per game + player so it survives closing the app.
+  DateTime? _logSeenAt;
+
+  String get _logSeenKey => 'logSeenAt_${widget.gameId}_$_uid';
+
+  Future<void> _loadLogSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ms = prefs.getInt(_logSeenKey);
+    // First ever launch: nothing is unread yet.
+    _logSeenAt = ms != null
+        ? DateTime.fromMillisecondsSinceEpoch(ms)
+        : ServerClock.now();
+    _recountLog();
+  }
+
+  void _markLogSeen() {
+    final now = ServerClock.now();
+    _logSeenAt = now;
+    SharedPreferences.getInstance()
+        .then((p) => p.setInt(_logSeenKey, now.millisecondsSinceEpoch));
+  }
   bool _logOpen = false;
 
   /// Whether the sidebar was opened onto the Log (the bottom-left button).
@@ -147,11 +169,10 @@ class _MapScreenState extends State<MapScreen>
   final ValueNotifier<int> _unreadLog = ValueNotifier<int>(0);
 
   void _recountLog() {
-    _unreadLog.value = _viewingLog
+    final seen = _logSeenAt;
+    _unreadLog.value = (_viewingLog || seen == null)
         ? 0
-        : _logEntries
-            .where((e) => e.at != null && e.at!.isAfter(_logSeenAt))
-            .length;
+        : _logEntries.where((e) => e.at != null && e.at!.isAfter(seen)).length;
   }
   final Set<String> _seenMissileIds = {};
 
@@ -244,10 +265,23 @@ class _MapScreenState extends State<MapScreen>
   );
   List<(Offset, double)> _radarCircles = const [];
   bool _radarOn = false;
-  bool _radarRed = false;
+  Color? _radarEdge;
+
+  /// Switching overlay kind (radar / silo / naval base) crossfades: the old
+  /// overlay shrinks out on this controller while the new one grows in on
+  /// [_radarCtl], at the same time.
+  late final AnimationController _radarOutCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  );
+  List<(Offset, double)> _outCircles = const [];
+  Color? _outEdge;
 
   /// The silo (province id) the player is aiming from; null = not aiming.
   String? _missileSiloId;
+
+  /// The naval base (province id) the player is aiming its navy from.
+  String? _navalBaseId;
 
   /// The missile currently in flight on the map, if any.
   ({Offset from, Offset to, Color color})? _missile;
@@ -289,6 +323,7 @@ class _MapScreenState extends State<MapScreen>
   @override
   void initState() {
     super.initState();
+    _loadLogSeen();
     _controller.loadMap(widget.assetPath);
 
     _provincesSub = _firestore
@@ -322,7 +357,7 @@ class _MapScreenState extends State<MapScreen>
     _logSub = _firestore.watchLog(gameId: widget.gameId).listen(
       (list) {
         _logEntries = list;
-        if (_viewingLog) _logSeenAt = ServerClock.now();
+        if (_viewingLog) _markLogSeen();
         _recountLog();
       },
       onError: (Object e) => debugPrint('Log badge stream error: $e'),
@@ -349,6 +384,7 @@ class _MapScreenState extends State<MapScreen>
     _cam.dispose();
     _revealCtl.dispose();
     _radarCtl.dispose();
+    _radarOutCtl.dispose();
     super.dispose();
   }
 
@@ -591,6 +627,20 @@ class _MapScreenState extends State<MapScreen>
     return out;
   }
 
+  /// Centre and radius (map units) of each of the player's naval bases.
+  List<(Offset, double)> _myNavalBases() {
+    final width = _controller.mapSize.width;
+    final out = <(Offset, double)>[];
+    _provinceStates.value.forEach((id, s) {
+      if (s.ownerId != _uid) return;
+      final fraction = GameRules.navalRadiusOf(s.buildingType);
+      if (fraction <= 0) return;
+      final province = _controller.provinceById(id);
+      if (province != null) out.add((province.anchor, fraction * width));
+    });
+    return out;
+  }
+
   /// Keeps the range overlay in step with the selection: a selected radar
   /// shows every radar's range, a selected missile silo shows every silo's
   /// range with a red edge, and while aiming a missile only that silo's
@@ -598,27 +648,60 @@ class _MapScreenState extends State<MapScreen>
   void _syncRadar(Province? selected, ProvinceState? state) {
     final mine = selected != null && state != null && state.ownerId == _uid;
     List<(Offset, double)>? circles;
-    var red = false;
+    Color? edge;
 
     final aimId = _missileSiloId;
     final aimProvince = aimId == null ? null : _controller.provinceById(aimId);
+    final navalId = _navalBaseId;
+    final navalProvince =
+        navalId == null ? null : _controller.provinceById(navalId);
     if (aimProvince != null) {
       final fraction = GameRules.missileRadiusOf(
         _provinceStates.value[aimId]?.buildingType ?? '',
       );
       circles = [(aimProvince.anchor, fraction * _controller.mapSize.width)];
-      red = true;
+      edge = ConqueraColors.danger;
+    } else if (navalProvince != null) {
+      final fraction = GameRules.navalRadiusOf(
+        _provinceStates.value[navalId]?.buildingType ?? '',
+      );
+      circles = [(navalProvince.anchor, fraction * _controller.mapSize.width)];
+      edge = GameRules.navyColor;
+    } else if (mine && GameRules.navalRadiusOf(state!.buildingType) > 0) {
+      circles = _myNavalBases();
+      edge = GameRules.navyColor;
     } else if (mine && GameRules.revealRadiusOf(state!.buildingType) > 0) {
       circles = _myRadars();
     } else if (mine && GameRules.missileRadiusOf(state!.buildingType) > 0) {
       circles = _mySilos();
-      red = true;
+      edge = ConqueraColors.danger;
     }
 
     final on = circles != null;
+
+    // A different kind of overlay is already showing: crossfade. The old one
+    // shrinks while the new one grows. Done after the frame so no controller
+    // is touched during build.
+    if (on && _radarOn && edge != _radarEdge) {
+      final nextCircles = circles;
+      final nextEdge = edge;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_radarOn || nextEdge == _radarEdge) return;
+        _outCircles = _radarCircles;
+        _outEdge = _radarEdge;
+        _radarOutCtl.value = _radarCtl.value;
+        _radarOutCtl.reverse();
+        _radarCircles = nextCircles;
+        _radarEdge = nextEdge;
+        _radarCtl.value = 0;
+        _radarCtl.forward();
+      });
+      return;
+    }
+
     if (circles != null) {
       _radarCircles = circles;
-      _radarRed = red;
+      _radarEdge = edge;
     }
     if (on == _radarOn) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -662,13 +745,14 @@ class _MapScreenState extends State<MapScreen>
               ? state.troops
               : (_frozenTroops[id] ?? 0))
           .floor();
-      if (icon == null && power <= 0) return;
+      if (icon == null && power <= 0 && !state.isNavalBase) return;
 
       badges.add(
         MapBadge(
           anchor: province.anchor,
           icon: icon,
           power: power,
+          navy: state.isNavalBase ? state.navy.floor() : null,
           extent: sqrt(province.bounds.width * province.bounds.height),
           color: _players.value[state.ownerId]?.color,
         ),
@@ -704,7 +788,7 @@ class _MapScreenState extends State<MapScreen>
 
   /// Buys the unclaimed [target] (it must border one of the player's
   /// provinces). Asks first, then plays the annexation on the map.
-  Future<void> _claim(Province target) async {
+  Future<void> _claim(Province target, {String? navalBaseId}) async {
     if (_battleRunning) return;
     final cost = GameRules.claimCost;
     final confirmed = await showDialog<bool>(
@@ -726,7 +810,9 @@ class _MapScreenState extends State<MapScreen>
                 alignment: PlaceholderAlignment.middle,
                 child: GoldAmount(cost, style: ConqueraText.value),
               ),
-              const TextSpan(text: '.'),
+              TextSpan(
+                text: navalBaseId != null ? ' and 1 navy.' : '.',
+              ),
             ],
           ),
         ),
@@ -749,17 +835,19 @@ class _MapScreenState extends State<MapScreen>
       ),
     );
     if (confirmed != true || !mounted) return;
-    await _runClaim(target);
+    if (navalBaseId != null) setState(() => _navalBaseId = null);
+    await _runClaim(target, navalBaseId: navalBaseId);
   }
 
   /// Buys [target] and plays the same camera flight and sweep as a won
   /// attack, without the war borders, then the "annexed" pop-up.
-  Future<void> _runClaim(Province target) async {
+  Future<void> _runClaim(Province target, {String? navalBaseId}) async {
     if (_battleRunning) return;
     final me = _players.value[_uid];
     final attackerColor = me?.color ?? ConqueraColors.accent;
     final messenger = ScaffoldMessenger.of(context);
-    final fighters = _myBorderingIds(target);
+    final fighters =
+        navalBaseId != null ? {navalBaseId} : _myBorderingIds(target);
 
     _controller.clearSelection();
     _popupAnim.stop();
@@ -787,12 +875,22 @@ class _MapScreenState extends State<MapScreen>
 
     String? error;
     try {
-      await _firestore.claimUnclaimedProvince(
-        gameId: widget.gameId,
-        uid: _uid,
-        provinceId: target.id,
-        neighborIds: _controller.neighborsOf(target.id),
-      );
+      if (navalBaseId != null) {
+        await _firestore.navalClaim(
+          gameId: widget.gameId,
+          uid: _uid,
+          baseId: navalBaseId,
+          provinceId: target.id,
+          neighborIds: _controller.neighborsOf(target.id),
+        );
+      } else {
+        await _firestore.claimUnclaimedProvince(
+          gameId: widget.gameId,
+          uid: _uid,
+          provinceId: target.id,
+          neighborIds: _controller.neighborsOf(target.id),
+        );
+      }
     } on GameActionException catch (e) {
       error = e.message;
     } catch (e) {
@@ -1015,7 +1113,11 @@ class _MapScreenState extends State<MapScreen>
   }
 
   /// Runs the attack against the server and plays what happens on the map.
-  Future<void> _runBattle(Province target, Set<String> previewFighters) async {
+  Future<void> _runBattle(
+    Province target,
+    Set<String> previewFighters, {
+    String? navalBaseId,
+  }) async {
     final players = _players.value;
     final states = _provinceStates.value;
     final me = players[_uid];
@@ -1054,13 +1156,21 @@ class _MapScreenState extends State<MapScreen>
     AttackResult? result;
     String? error;
     try {
-      result = await _firestore.attackProvince(
-        gameId: widget.gameId,
-        uid: _uid,
-        targetId: target.id,
-        neighborIds: _controller.neighborsOf(target.id),
-        supportLinks: _supportLinks(target),
-      );
+      result = navalBaseId != null
+          ? await _firestore.navalAttack(
+              gameId: widget.gameId,
+              uid: _uid,
+              baseId: navalBaseId,
+              targetId: target.id,
+              neighborIds: _controller.neighborsOf(target.id),
+            )
+          : await _firestore.attackProvince(
+              gameId: widget.gameId,
+              uid: _uid,
+              targetId: target.id,
+              neighborIds: _controller.neighborsOf(target.id),
+              supportLinks: _supportLinks(target),
+            );
     } on GameActionException catch (e) {
       error = e.message;
     } catch (e) {
@@ -1399,6 +1509,23 @@ class _MapScreenState extends State<MapScreen>
   /// The USE button beside Manage.
   void _useBuilding(Province province, ProvinceState? state) {
     if (_battleRunning || state == null || state.ownerId != _uid) return;
+    if (state.isNavalBase) {
+      final readyAt = _players.value[_uid]?.attackReadyAt;
+      final now = ServerClock.now();
+      if (readyAt != null && now.isBefore(readyAt)) {
+        _toast('Your forces are still recovering.');
+        return;
+      }
+      if (!GameRules.canAct(state.navy)) {
+        _toast('Your navy is too weak to attack. Buy ships in Manage.');
+        return;
+      }
+      setState(() {
+        _missileSiloId = null;
+        _navalBaseId = province.id;
+      });
+      return;
+    }
     if (GameRules.missileRadiusOf(state.buildingType) <= 0) return;
 
     final readyAt = state.missileReadyAt;
@@ -1417,8 +1544,11 @@ class _MapScreenState extends State<MapScreen>
   }
 
   void _cancelMissile() {
-    if (_missileSiloId == null) return;
-    setState(() => _missileSiloId = null);
+    if (_missileSiloId == null && _navalBaseId == null) return;
+    setState(() {
+      _missileSiloId = null;
+      _navalBaseId = null;
+    });
   }
 
   void _toast(String text) {
@@ -1427,11 +1557,24 @@ class _MapScreenState extends State<MapScreen>
       ..showSnackBar(SnackBar(content: Text(text)));
   }
 
-  bool _inMissileRange(String siloId, Province target) {
-    final silo = _controller.provinceById(siloId);
-    final fraction = GameRules.missileRadiusOf(
-      _provinceStates.value[siloId]?.buildingType ?? '',
-    );
+  bool _inMissileRange(String siloId, Province target) => _inRange(
+        siloId,
+        target,
+        GameRules.missileRadiusOf(
+          _provinceStates.value[siloId]?.buildingType ?? '',
+        ),
+      );
+
+  bool _inNavalRange(String baseId, Province target) => _inRange(
+        baseId,
+        target,
+        GameRules.navalRadiusOf(
+          _provinceStates.value[baseId]?.buildingType ?? '',
+        ),
+      );
+
+  bool _inRange(String fromId, Province target, double fraction) {
+    final silo = _controller.provinceById(fromId);
     if (silo == null || fraction <= 0) return false;
     final width = _controller.mapSize.width;
     var dx = (target.anchor.dx - silo.anchor.dx).abs();
@@ -1454,6 +1597,80 @@ class _MapScreenState extends State<MapScreen>
       paths.add(p.path);
     });
     return paths;
+  }
+
+  /// Outlines of the coastal enemy territories the aiming base can attack.
+  List<Path> _navalTargetPaths() {
+    final baseId = _navalBaseId;
+    if (baseId == null) return const [];
+    final paths = <Path>[];
+    // Enemy and unclaimed coastal territories (unclaimed ones may have no
+    // province document yet, so walk the map rather than the states).
+    for (final p in _controller.provinces) {
+      final ownerId = _provinceStates.value[p.id]?.ownerId;
+      if (p.id == baseId || ownerId == _uid) continue;
+      if (!TerritoryTypes.isCoastal(p.id) || !_inNavalRange(baseId, p)) continue;
+      paths.add(p.path);
+    }
+    return paths;
+  }
+
+  /// A tap while aiming a navy: the tapped territory opens the battle
+  /// preview; confirming plays the invasion.
+  Future<void> _onNavalTap() async {
+    final baseId = _navalBaseId;
+    final target = _controller.selectedProvince;
+    if (baseId == null || target == null || _battleRunning) return;
+    if (target.id == baseId) {
+      _cancelMissile();
+      return;
+    }
+    final ownerId = _provinceStates.value[target.id]?.ownerId;
+    if (ownerId == _uid) {
+      _toast('Pick an enemy or unclaimed territory.');
+      return;
+    }
+    if (!TerritoryTypes.isCoastal(target.id)) {
+      _toast('A navy can only reach coastal territories.');
+      return;
+    }
+    if (!_inNavalRange(baseId, target)) {
+      _toast('Out of range.');
+      return;
+    }
+    if (ownerId == null) {
+      // Unclaimed: buy it with the navy instead of fighting.
+      await _claim(target, navalBaseId: baseId);
+      return;
+    }
+
+    final fighters = await showDialog<Set<String>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AttackDialog(
+        uid: _uid,
+        targetId: target.id,
+        targetName: target.name,
+        neighborIds: _controller.neighborsOf(target.id),
+        supportLinks: const {},
+        targetVisible: _canSee(target.id),
+        provinceNames: {
+          for (final p in _controller.provinces) p.id: p.name,
+        },
+        provinceStates: _provinceStates,
+        players: _players,
+        navalBaseId: baseId,
+      ),
+    );
+    if (fighters == null || !mounted) return;
+    setState(() => _navalBaseId = null);
+    try {
+      await _runBattle(target, fighters, navalBaseId: baseId);
+    } catch (e, st) {
+      debugPrint('Naval battle animation failed: $e');
+      debugPrintStack(stackTrace: st);
+      if (mounted) _endBattle();
+    }
   }
 
   /// A tap while aiming: the tapped territory is the target.
@@ -1572,7 +1789,7 @@ class _MapScreenState extends State<MapScreen>
       _sidebarLog = true;
       _sidebarOpen = true;
     });
-    _logSeenAt = ServerClock.now();
+    _markLogSeen();
     _recountLog();
   }
 
@@ -1679,6 +1896,7 @@ class _MapScreenState extends State<MapScreen>
         scale: _transform.value.getMaxScaleOnAxis(),
       );
       if (_missileSiloId != null) _onMissileTap();
+      if (_navalBaseId != null) _onNavalTap();
     }
   }
 
@@ -1805,7 +2023,7 @@ class _MapScreenState extends State<MapScreen>
   void _openLog() {
     setState(() => _sidebarOpen = false);
     _logOpen = true;
-    _logSeenAt = ServerClock.now();
+    _markLogSeen();
     _recountLog();
     Navigator.of(context)
         .push(
@@ -1840,7 +2058,7 @@ class _MapScreenState extends State<MapScreen>
     )
         .then((_) {
       _logOpen = false;
-      _logSeenAt = ServerClock.now();
+      _markLogSeen();
       _recountLog();
     });
   }
@@ -1891,8 +2109,9 @@ class _MapScreenState extends State<MapScreen>
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                // While aiming a missile the panel keeps showing the silo.
-                final aimId = _missileSiloId;
+                // While aiming a missile or navy the panel keeps showing the
+                // silo / base.
+                final aimId = _missileSiloId ?? _navalBaseId;
                 final selected = (aimId == null
                         ? null
                         : _controller.provinceById(aimId)) ??
@@ -2005,14 +2224,23 @@ class _MapScreenState extends State<MapScreen>
                                     IgnorePointer(
                                       child: RepaintBoundary(
                                         child: AnimatedBuilder(
-                                          animation: _radarCtl,
+                                          animation: Listenable.merge(
+                                              [_radarCtl, _radarOutCtl]),
                                           builder: (context, _) => CustomPaint(
                                             size: sceneSize,
+                                            // The overlay shrinking out.
                                             painter: RadarPainter(
+                                              circles: _outCircles,
+                                              edgeColor: _outEdge,
+                                              progress: Curves.easeInOut
+                                                  .transform(
+                                                      _radarOutCtl.value),
+                                              wrapWidth: mapSize.width,
+                                            ),
+                                            // The overlay growing in.
+                                            foregroundPainter: RadarPainter(
                                               circles: _radarCircles,
-                                              edgeColor: _radarRed
-                                                  ? ConqueraColors.danger
-                                                  : null,
+                                              edgeColor: _radarEdge,
                                               progress: Curves.easeInOut
                                                   .transform(_radarCtl.value),
                                               wrapWidth: mapSize.width,
@@ -2021,7 +2249,8 @@ class _MapScreenState extends State<MapScreen>
                                         ),
                                       ),
                                     ),
-                                    if (_missileSiloId != null)
+                                    if (_missileSiloId != null ||
+                                        _navalBaseId != null)
                                       IgnorePointer(
                                         child: RepaintBoundary(
                                           child: AnimatedBuilder(
@@ -2029,10 +2258,14 @@ class _MapScreenState extends State<MapScreen>
                                             builder: (context, _) => CustomPaint(
                                               size: sceneSize,
                                               painter: TargetPainter(
-                                                paths: _missileTargetPaths(),
+                                                paths: _navalBaseId != null
+                                                    ? _navalTargetPaths()
+                                                    : _missileTargetPaths(),
                                                 scale: _transform.value
                                                     .getMaxScaleOnAxis(),
-                                                color: ConqueraColors.danger,
+                                                color: _navalBaseId != null
+                                                    ? GameRules.navyColor
+                                                    : ConqueraColors.danger,
                                                 wrapWidth: mapSize.width,
                                               ),
                                             ),
@@ -2131,21 +2364,27 @@ class _MapScreenState extends State<MapScreen>
                                         selectedState!.buildingType,
                                       )?.useIcon
                                     : null,
-                                useColor: ConqueraColors.danger,
-                                useReadyAt: selectedState?.missileReadyAt,
+                                useColor: selectedState?.isNavalBase == true
+                                    ? GameRules.navyColor
+                                    : ConqueraColors.danger,
+                                useReadyAt: selectedState?.isNavalBase == true
+                                    ? attackReadyAt
+                                    : selectedState?.missileReadyAt,
                                 useCost: GameRules.missileRadiusOf(
                                           selectedState?.buildingType ?? '',
                                         ) >
                                         0
                                     ? GameRules.missileCost
                                     : null,
-                                useEnabled:
-                                    (_players.value[_uid]
-                                            ?.goldAt(ServerClock.now()) ??
-                                        0) >=
-                                    GameRules.missileCost,
+                                useEnabled: selectedState?.isNavalBase == true
+                                    ? GameRules.canAct(selectedState!.navy)
+                                    : (_players.value[_uid]
+                                                ?.goldAt(ServerClock.now()) ??
+                                            0) >=
+                                        GameRules.missileCost,
                                 onUse: () => _useBuilding(selected, selectedState),
-                                useCancel: _missileSiloId != null,
+                                useCancel:
+                                    _missileSiloId != null || _navalBaseId != null,
                                 onUseCancel: _cancelMissile,
                               ),
                       ),

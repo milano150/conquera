@@ -64,6 +64,9 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   /// Unit picked in the reinforce dropdown (null = none picked).
   UnitDef? _unit;
 
+  /// Ship picked in the navy dropdown of a naval base (null = none).
+  UnitDef? _navyUnit;
+
   bool _busy = false;
   String? _message;
   bool _isError = false;
@@ -133,6 +136,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
       builder: (_) => _BuildingPicker(
         provinceId: widget.provinceId,
         neighbors: widget.neighborIds.length,
+        ownNeighborTypes: {
+          for (final id in widget.neighborIds)
+            if (widget.provinceStates.value[id]?.ownerId == widget.uid)
+              widget.provinceStates.value[id]!.buildingType,
+        },
         gold: gold,
         selected: _pendingBuilding,
       ),
@@ -196,6 +204,20 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
       );
       if (mounted) setState(() => _pendingBuilding = null);
     }, '$label destroyed.');
+  }
+
+  Future<void> _recruitNavy() {
+    final unit = _navyUnit;
+    if (unit == null) return Future.value();
+    return _run(() async {
+      await widget.firestore.recruitNavy(
+        gameId: widget.gameId,
+        provinceId: widget.provinceId,
+        uid: widget.uid,
+        unit: unit,
+      );
+      if (mounted) setState(() => _navyUnit = null);
+    }, '${unit.name} added: +${unit.power} navy.');
   }
 
   Future<void> _recruit() {
@@ -328,7 +350,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             const SizedBox(height: ConqueraSpace.lg),
             const _SectionTitle('Reinforce'),
             const SizedBox(height: ConqueraSpace.sm),
-            ..._reinforceSection(troops: troops, gold: gold),
+            ..._reinforceSection(
+              troops: troops,
+              gold: gold,
+              navy: province?.isNavalBase == true ? province!.navy : null,
+            ),
             if (_message != null)
               Padding(
                 padding: const EdgeInsets.only(top: ConqueraSpace.md),
@@ -345,6 +371,14 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
       ),
     );
   }
+
+  /// Bordering territories of the player that count for [def]: all of them
+  /// for a market, only the rigs and oil fields for a refinery.
+  int _partnersFor(BuildingDef? def) => widget.neighborIds.where((id) {
+        final s = widget.provinceStates.value[id];
+        return s?.ownerId == widget.uid &&
+            (def?.countsAsPartner(s?.buildingType ?? 'none') ?? true);
+      }).length;
 
   /// Build section. Two states:
   ///  * province has a building: it is shown solid with a Destroy button;
@@ -372,7 +406,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   _LockedField(text: province.buildingLabel),
                   const SizedBox(height: ConqueraSpace.sm),
                   _ActionRow(
-                    info: def?.effectLabelFor(partners, widget.provinceId) ?? '',
+                    info: def?.effectLabelFor(_partnersFor(def), widget.provinceId) ?? '',
                     unaffordable: false,
                     button: OutlinedButton(
                       onPressed:
@@ -423,7 +457,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                 _ActionRow(
                   info: pending == null
                       ? (cooling ? 'Cooling down' : '')
-                      : pending.effectLabelFor(partners, widget.provinceId),
+                      : pending.effectLabelFor(_partnersFor(pending), widget.provinceId),
                   unaffordable: unaffordable,
                   button: FilledButton(
                     onPressed: canBuild ? _build : null,
@@ -438,7 +472,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     ];
   }
 
-  List<Widget> _reinforceSection({required int troops, required double gold}) {
+  List<Widget> _reinforceSection({
+    required int troops,
+    required double gold,
+    double? navy,
+  }) {
     final unit = _unit;
     final unaffordable = unit != null && gold < unit.cost;
     final canRecruit = unit != null && !unaffordable && !_busy;
@@ -473,6 +511,65 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
           child: const Text('Reinforce'),
         ),
       ),
+      // A naval base also holds a navy (blue), bought separately.
+      if (navy != null) ...[
+        const SizedBox(height: ConqueraSpace.lg),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              '${navy.floor()}',
+              style: ConqueraText.figure.copyWith(color: GameRules.navyColor),
+            ),
+            Text(
+              ' / ${GameRules.maxNavy.floor()}',
+              style: ConqueraText.label,
+            ),
+            const SizedBox(width: ConqueraSpace.sm),
+            Text('navy', style: ConqueraText.label),
+          ],
+        ),
+        const SizedBox(height: ConqueraSpace.sm),
+        _Dropdown<UnitDef>(
+          value: _navyUnit,
+          hint: 'Select ship',
+          items: GameRules.navyUnits,
+          name: (u) => u.name,
+          price: (u) => u.cost,
+          isEnabled: (u) =>
+              gold >= u.cost && navy + u.power <= GameRules.maxNavy,
+          onChanged: _busy ? null : (u) => setState(() => _navyUnit = u),
+        ),
+        const SizedBox(height: ConqueraSpace.sm),
+        _ActionRow(
+          price: _navyUnit?.cost,
+          info: _navyUnit == null
+              ? ''
+              : (navy + _navyUnit!.power > GameRules.maxNavy
+                  ? 'Over the ${GameRules.maxNavy.floor()} navy limit'
+                  : '+${_navyUnit!.power} navy'),
+          unaffordable: _navyUnit != null && gold < _navyUnit!.cost,
+          button: Builder(builder: (_) {
+            final canAddNavy = _navyUnit != null &&
+                gold >= _navyUnit!.cost &&
+                navy + _navyUnit!.power <= GameRules.maxNavy &&
+                !_busy;
+            return OutlinedButton(
+              onPressed: canAddNavy ? _recruitNavy : null,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: GameRules.navyColor,
+                side: BorderSide(
+                  color: canAddNavy
+                      ? GameRules.navyColor
+                      : ConqueraColors.divider,
+                ),
+              ),
+              child: const Text('Add navy'),
+            );
+          }),
+        ),
+      ],
     ];
   }
 }
@@ -847,9 +944,9 @@ enum _Category {
 }
 
 _Category _categoryOf(BuildingDef b) => switch (b.id) {
-      'watchtower' || 'radar' => _Category.surveillance,
+      'watchtower' || 'radar' || 'high_altitude_radar' => _Category.surveillance,
       'fortress' || 'wall' => _Category.defense,
-      'barracks' || 'missile_silo' => _Category.military,
+      'barracks' || 'missile_silo' || 'naval_base' => _Category.military,
       _ => _Category.production,
     };
 
@@ -860,19 +957,25 @@ _Category _categoryOf(BuildingDef b) => switch (b.id) {
 class _BuildingPicker extends StatelessWidget {
   final String provinceId;
   final int neighbors;
+
+  /// Building types on the bordering territories the player owns.
+  final Set<String> ownNeighborTypes;
   final double gold;
   final BuildingDef? selected;
 
   const _BuildingPicker({
     required this.provinceId,
     required this.neighbors,
+    required this.ownNeighborTypes,
     required this.gold,
     required this.selected,
   });
 
   /// Buildings this territory can't hold are not shown at all.
+  /// A refinery also needs a bordering rig or oil field of the player.
   bool _available(BuildingDef b) =>
-      GameRules.canBuildHere(b, provinceId, neighbors: neighbors);
+      GameRules.canBuildHere(b, provinceId, neighbors: neighbors) &&
+      (b.suppliedBy.isEmpty || b.suppliedBy.any(ownNeighborTypes.contains));
 
   @override
   Widget build(BuildContext context) {
@@ -1054,6 +1157,7 @@ class _BuildingInfoDialog extends StatelessWidget {
   String get _where => switch (building.site) {
         BuildSite.coastal => 'Coastal territories',
         BuildSite.archipelago => 'Island territories',
+        BuildSite.mountainous => 'Mountainous territories',
         BuildSite.producer => switch (building.id) {
           'diamond_mine' => 'Diamond-mining territories',
           'uranium_mine' => 'Uranium-mining territories',

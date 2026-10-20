@@ -9,6 +9,7 @@ import '../models/province_state.dart';
 import '../services/firestore_service.dart';
 import '../config/saved_world.dart';
 import '../screens/settings_screen.dart';
+import '../screens/trade_screen.dart';
 import '../theme/conquera_theme.dart';
 import 'feed_panels.dart';
 import 'leaderboard_panel.dart';
@@ -281,6 +282,20 @@ class _PanelState extends State<_Panel> {
           onTap: () => setState(() => _view = _View.history),
         ),
         _Item(label: 'Log', onTap: () => setState(() => _view = _View.log)),
+        _Item(
+          label: 'Trade',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => TradeScreen(
+                gameId: widget.worldId,
+                myUid: widget.myUid,
+                players: widget.players,
+                provinces: widget.provinces,
+                provinceNames: widget.provinceNames,
+              ),
+            ),
+          ),
+        ),
         _Item(label: 'How to play', onTap: widget.onOpenHowToPlay),
         _Item(
           label: 'Settings',

@@ -20,6 +20,9 @@ class ProvinceState {
   /// When the building was last used (a missile silo's last launch).
   final DateTime? buildingLastUsedAt;
 
+  /// Navy power held here; only meaningful while the building is a naval base.
+  final double navy;
+
   const ProvinceState({
     required this.id,
     required this.ownerId,
@@ -28,6 +31,7 @@ class ProvinceState {
     required this.buildingType,
     required this.buildingLevel,
     this.buildingLastUsedAt,
+    this.navy = 0,
   });
 
   factory ProvinceState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -45,12 +49,16 @@ class ProvinceState {
       buildingLevel:
           building is Map ? (building['level'] as num?)?.toInt() ?? 0 : 0,
       buildingLastUsedAt: lastUsed is Timestamp ? lastUsed.toDate() : null,
+      navy: (data['navy'] as num?)?.toDouble() ?? 0,
     );
   }
 
   /// When a missile silo here can fire again (null = ready).
   DateTime? get missileReadyAt =>
       buildingLastUsedAt?.add(GameRules.missileCooldown);
+
+  /// True for a naval base (it shows power/navy on the map).
+  bool get isNavalBase => GameRules.navalRadiusOf(buildingType) > 0;
 
   bool get hasBuilding => buildingType != 'none' && buildingType.isNotEmpty;
 

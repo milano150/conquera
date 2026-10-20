@@ -37,6 +37,10 @@ class AttackDialog extends StatefulWidget {
   final ValueListenable<Map<String, ProvinceState>> provinceStates;
   final ValueListenable<Map<String, PlayerState>> players;
 
+  /// Set for a naval attack: the naval base whose navy fights (instead of
+  /// the bordering provinces).
+  final String? navalBaseId;
+
   const AttackDialog({
     super.key,
     required this.uid,
@@ -48,6 +52,7 @@ class AttackDialog extends StatefulWidget {
     required this.provinceNames,
     required this.provinceStates,
     required this.players,
+    this.navalBaseId,
   });
 
   @override
@@ -91,7 +96,16 @@ class _AttackDialogState extends State<AttackDialog> {
     final fighters = <String>{};
     final direct = <({String text, int power})>[];
     final ownedBorders = <String>{};
-    for (final id in widget.neighborIds) {
+    final baseId = widget.navalBaseId;
+    if (baseId != null) {
+      // Naval attack: only the base's navy fights.
+      final navy = states[baseId]?.navy ?? 0;
+      if (GameRules.canAct(navy)) {
+        fighters.add(baseId);
+        power += navy;
+      }
+    }
+    for (final id in baseId != null ? const <String>[] : widget.neighborIds) {
       final state = states[id];
       if (state != null && state.ownerId == widget.uid) {
         // Still counts as a bordering province a barracks can link to, but
@@ -107,7 +121,7 @@ class _AttackDialogState extends State<AttackDialog> {
       }
     }
     final support = <({String text, int power, IconData? icon})>[];
-    widget.supportLinks.forEach((id, links) {
+    if (baseId == null) widget.supportLinks.forEach((id, links) {
       if (widget.neighborIds.contains(id)) return;
       final state = states[id];
       if (state == null || state.ownerId != widget.uid) return;
@@ -126,6 +140,12 @@ class _AttackDialogState extends State<AttackDialog> {
     support.sort((a, b) => b.power.compareTo(a.power));
     _fighterIds = fighters;
     _involved = [
+      if (baseId != null)
+        _Line(
+          '${widget.provinceNames[baseId] ?? baseId}  '
+          '${(states[baseId]?.navy ?? 0).floor()} navy',
+          icon: Icons.sailing,
+        ),
       for (final d in direct) _Line(d.text),
       for (final s in support) _Line(s.text, icon: s.icon),
     ];
@@ -139,7 +159,7 @@ class _AttackDialogState extends State<AttackDialog> {
     var supportPower = 0.0;
     final defenderSupport = <({String text, int power, IconData? icon})>[];
     final defenderId = target?.ownerId;
-    if (defenderId != null) {
+    if (defenderId != null && baseId == null) {
       for (final id in widget.neighborIds) {
         if (id == widget.targetId) continue;
         final state = states[id];
@@ -219,7 +239,9 @@ class _AttackDialogState extends State<AttackDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Attack ${widget.targetName}',
+                  widget.navalBaseId != null
+                      ? 'Naval attack on ${widget.targetName}'
+                      : 'Attack ${widget.targetName}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: ConqueraText.title,
@@ -237,6 +259,8 @@ class _AttackDialogState extends State<AttackDialog> {
                           color: _me?.color,
                         ),
                         power: _attackPower,
+                        powerColor:
+                            widget.navalBaseId != null ? GameRules.navyColor : null,
                         lines: _involved,
                       ),
                     ),
@@ -306,7 +330,9 @@ class _AttackDialogState extends State<AttackDialog> {
                   : ConqueraColors.divider,
             ),
           ),
-          child: const Text('Confirm attack'),
+          child: Text(
+            widget.navalBaseId != null ? 'Launch naval attack' : 'Confirm attack',
+          ),
         ),
       ],
     );
@@ -318,6 +344,7 @@ class _AttackDialogState extends State<AttackDialog> {
     required Widget tag,
     required double power,
     required List<_Line> lines,
+    Color? powerColor,
     bool hidden = false,
   }) {
     return Column(
@@ -327,7 +354,7 @@ class _AttackDialogState extends State<AttackDialog> {
         const SizedBox(height: ConqueraSpace.xs),
         Text(
           hidden ? '?' : '${power.floor()}',
-          style: ConqueraText.figure.copyWith(fontSize: 36),
+          style: ConqueraText.figure.copyWith(fontSize: 36, color: powerColor),
         ),
         for (final line in lines)
           Row(
@@ -381,7 +408,9 @@ class _AttackDialogState extends State<AttackDialog> {
   /// weak or winning attack needs no text: the bar already says it.
   Widget _warning() {
     return Text(
-      'Your bordering provinces have no power.',
+      widget.navalBaseId != null
+          ? 'Your navy has no power.'
+          : 'Your bordering provinces have no power.',
       style: ConqueraText.label.copyWith(color: ConqueraColors.danger),
     );
   }

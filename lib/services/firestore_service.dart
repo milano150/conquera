@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../config/game_rules.dart';
+import '../config/territory_types.dart';
 import '../models/battle_event.dart';
 import '../models/missile_event.dart';
 import '../models/log_entry.dart';
@@ -209,6 +210,7 @@ class FirestoreService {
     Iterable<DocumentSnapshot<Map<String, dynamic>>> neighborSnaps, {
     required String? fromOwner,
     required String toOwner,
+    String capturedBuildingType = 'none',
   }) {
     var gain = 0.0;
     var loss = 0.0;
@@ -221,6 +223,19 @@ class FirestoreService {
       if (def == null || !def.tradesWithNeighbors) continue;
       final owner = data?['ownerId'];
       final trades = (building['trades'] as num?)?.toInt() ?? 0;
+      if (def.suppliedBy.isNotEmpty) {
+        // A refinery only cares about its suppliers: the captured province
+        // loses its building, so the old owner's refineries lose a supplier.
+        if (fromOwner != null &&
+            owner == fromOwner &&
+            def.suppliedBy.contains(capturedBuildingType) &&
+            trades > 0) {
+          tx.update(snap.reference, {'building.trades': trades - 1});
+          loss += def.incomeFor(trades, snap.id) -
+              def.incomeFor(trades - 1, snap.id);
+        }
+        continue;
+      }
       if (owner == toOwner) {
         tx.update(snap.reference, {'building.trades': trades + 1});
         gain += def.partnerRateFor(snap.id);
@@ -230,6 +245,40 @@ class FirestoreService {
       }
     }
     return (gain: gain, loss: loss);
+  }
+
+  /// A supplier building (rig, oil field) of [owner] appeared (+1) or went
+  /// away (-1) next to [neighborSnaps]. Updates the 'trades' of the owner's
+  /// refineries there and returns the change in the owner's income per second.
+  double _shiftSupply(
+    Transaction tx,
+    Iterable<DocumentSnapshot<Map<String, dynamic>>> neighborSnaps, {
+    required String owner,
+    required String supplierType,
+    required int delta,
+  }) {
+    var change = 0.0;
+    for (final snap in neighborSnaps) {
+      if (!snap.exists) continue;
+      final data = snap.data();
+      final building = data?['building'];
+      if (building is! Map || data?['ownerId'] != owner) continue;
+      final def = GameRules.buildingById(building['type'] as String? ?? '');
+      if (def == null || !def.suppliedBy.contains(supplierType)) continue;
+      final trades = (building['trades'] as num?)?.toInt() ?? 0;
+      final next = trades + delta < 0 ? 0 : trades + delta;
+      if (next == trades) continue;
+      tx.update(snap.reference, {'building.trades': next});
+      change += def.incomeFor(next, snap.id) - def.incomeFor(trades, snap.id);
+    }
+    return change;
+  }
+
+  /// Bordering province ids saved on a building (markets, suppliers).
+  List<String> _neighborIdsOf(Map<String, dynamic>? provinceData) {
+    final building = provinceData?['building'];
+    if (building is! Map) return const [];
+    return (building['neighbors'] as List?)?.cast<String>() ?? const [];
   }
 
   /// Splits [total] power between a newly taken province and the
@@ -370,6 +419,7 @@ class FirestoreService {
         neighborSnaps,
         fromOwner: previousOwnerId,
         toOwner: uid,
+        capturedBuildingType: _buildingTypeOf(provinceData),
       );
 
       if (provinceSnap.exists) {
@@ -436,8 +486,9 @@ class FirestoreService {
     final playerRef = _playerRef(gameId, uid);
     final neighbors = neighborIds.toSet()..remove(provinceId);
     // Only a market needs to know who the neighbors belong to.
+    final supplies = GameRules.suppliesOthers(building.id);
     final neighborRefs = [
-      if (building.tradesWithNeighbors)
+      if (building.tradesWithNeighbors || supplies)
         for (final id in neighbors) _provincesRef(gameId).doc(id),
     ];
 
@@ -475,19 +526,37 @@ class FirestoreService {
       if (gold < building.cost) return 'Not enough gold.';
 
       // A market trades with the bordering territories the player owns.
+      // (a refinery only counts bordering suppliers of the player).
       final trades = neighborSnaps
-          .where((snap) => snap.exists && snap.data()?['ownerId'] == uid)
+          .where((snap) =>
+              snap.exists &&
+              snap.data()?['ownerId'] == uid &&
+              building.countsAsPartner(_buildingTypeOf(snap.data())))
           .length;
-      final addedIncome = building.incomeFor(trades, provinceId);
+      if (building.suppliedBy.isNotEmpty && trades == 0) {
+        return 'A ${building.name} needs a bordering rig or oil field of yours.';
+      }
+      var addedIncome = building.incomeFor(trades, provinceId);
+      // A new rig or oil field switches on the player's bordering refineries.
+      if (supplies) {
+        addedIncome += _shiftSupply(
+          tx,
+          neighborSnaps,
+          owner: uid,
+          supplierType: building.id,
+          delta: 1,
+        );
+      }
 
       tx.update(provinceRef, {
+        // A new naval base starts with no navy.
+        if (building.navalRadius > 0) 'navy': 0,
         'building': {
           'type': building.id,
           'level': 1,
-          if (building.tradesWithNeighbors) ...{
+          if (building.tradesWithNeighbors || supplies)
             'neighbors': neighbors.toList(),
-            'trades': trades,
-          },
+          if (building.tradesWithNeighbors) 'trades': trades,
         },
       });
       tx.update(
@@ -538,6 +607,22 @@ class FirestoreService {
 
       final removedIncome = _buildingIncomeOf(data, provinceId);
 
+      // A rig or oil field also switches off the refineries next to it.
+      final destroyedType = _buildingTypeOf(data);
+      final neighborSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      if (GameRules.suppliesOthers(destroyedType)) {
+        for (final id in _neighborIdsOf(data)) {
+          neighborSnaps.add(await tx.get(_provincesRef(gameId).doc(id)));
+        }
+      }
+      final supplyChange = _shiftSupply(
+        tx,
+        neighborSnaps,
+        owner: uid,
+        supplierType: destroyedType,
+        delta: -1,
+      );
+
       tx.update(provinceRef, {
         'building': {'type': 'none', 'level': 0},
       });
@@ -546,7 +631,8 @@ class FirestoreService {
         ..._settledIncomeUpdate(
           playerSnap,
           owned: _ownedCount(playerSnap),
-          buildingIncome: _buildingIncome(playerSnap) - removedIncome,
+          buildingIncome:
+              _buildingIncome(playerSnap) - removedIncome + supplyChange,
           now: now,
         ),
         // Starts the "can't build yet" cooldown.
@@ -600,6 +686,14 @@ class FirestoreService {
       if (!attackerSnap.exists) return 'Player not found.';
       final victimRef = _playerRef(gameId, victimId);
       final victimSnap = await tx.get(victimRef);
+      // Destroying a rig or oil field also switches off the victim's
+      // refineries next to it.
+      final hitSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      if (GameRules.suppliesOthers(_buildingTypeOf(target))) {
+        for (final id in _neighborIdsOf(target)) {
+          hitSnaps.add(await tx.get(_provincesRef(gameId).doc(id)));
+        }
+      }
 
       final now = ServerClock.now();
       final siloBuilding = silo?['building'];
@@ -618,7 +712,14 @@ class FirestoreService {
       final troops = (target?['troops'] as num?)?.toDouble() ?? 0;
       final reduced = troops - GameRules.missilePowerDamage;
       final left = troops <= 1 ? troops : (reduced < 1 ? 1.0 : reduced);
-      final removedIncome = _buildingIncomeOf(target, targetId);
+      final removedIncome = _buildingIncomeOf(target, targetId) -
+          _shiftSupply(
+            tx,
+            hitSnaps,
+            owner: victimId,
+            supplierType: hitBuilding,
+            delta: -1,
+          );
 
       tx.update(siloRef, {'building.lastUsedAt': Timestamp.fromDate(now)});
       tx.update(targetRef, {
@@ -636,7 +737,7 @@ class FirestoreService {
           spend: GameRules.missileCost.toDouble(),
         ),
       );
-      if (victimSnap.exists && removedIncome > 0) {
+      if (victimSnap.exists && removedIncome != 0) {
         tx.update(
           victimRef,
           _settledIncomeUpdate(
@@ -717,6 +818,300 @@ class FirestoreService {
     });
 
     if (error != null) throw GameActionException(error);
+  }
+
+  /// Buys [unit] of navy for the naval base in [provinceId]. A base holds at
+  /// most [GameRules.maxNavy]. Throws [GameActionException] if not allowed.
+  Future<void> recruitNavy({
+    required String gameId,
+    required String provinceId,
+    required String uid,
+    required UnitDef unit,
+  }) async {
+    final provinceRef = _provincesRef(gameId).doc(provinceId);
+    final playerRef = _playerRef(gameId, uid);
+
+    final error = await _db.runTransaction<String?>((tx) async {
+      final provinceSnap = await tx.get(provinceRef);
+      final playerSnap = await tx.get(playerRef);
+
+      final data = provinceSnap.data();
+      if (!provinceSnap.exists || data?['ownerId'] != uid) {
+        return "You don't own this province.";
+      }
+      if (!playerSnap.exists) return 'Player not found.';
+      if (GameRules.navalRadiusOf(_buildingTypeOf(data)) <= 0) {
+        return 'You need a naval base here.';
+      }
+
+      final navy = (data?['navy'] as num?)?.toDouble() ?? 0;
+      if (navy + unit.power > GameRules.maxNavy) {
+        return 'A naval base holds at most ${GameRules.maxNavy.floor()} navy.';
+      }
+      final now = ServerClock.now();
+      final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
+      if (gold < unit.cost) return 'Not enough gold.';
+
+      tx.update(provinceRef, {'navy': navy + unit.power});
+      tx.update(playerRef, {
+        'gold': gold - unit.cost,
+        'goldUpdatedAt': FieldValue.serverTimestamp(),
+      });
+      return null;
+    });
+
+    if (error != null) throw GameActionException(error);
+  }
+
+  /// [uid] attacks the coastal province [targetId] with the navy of the naval
+  /// base in [baseId] (the caller checks the range). Only the base's navy
+  /// fights: X = its navy, Y = the target's troops (times its building's
+  /// defense bonus); X > Y wins, a tie goes to the defender. No barracks help
+  /// either side. Win: the leftover X - Y is split between the annexed
+  /// province (land troops) and the base (navy), and a building on the target
+  /// is destroyed. Loss: the navy loses [GameRules.failedAttackLossShare] and
+  /// the defence loses the same amount. Either way the attack cooldown starts.
+  /// [neighborIds] are the target's bordering provinces, so markets and
+  /// refineries next door update. Throws [GameActionException] if not allowed.
+  Future<AttackResult> navalAttack({
+    required String gameId,
+    required String uid,
+    required String baseId,
+    required String targetId,
+    required Iterable<String> neighborIds,
+  }) async {
+    final targetRef = _provincesRef(gameId).doc(targetId);
+    final baseRef = _provincesRef(gameId).doc(baseId);
+    final attackerRef = _playerRef(gameId, uid);
+    final borderRefs = [
+      for (final id in neighborIds.toSet())
+        if (id != targetId) _provincesRef(gameId).doc(id),
+    ];
+
+    AttackResult? result;
+    String? error;
+    final attackerRows = <Map<String, dynamic>>[];
+    final defenderRows = <Map<String, dynamic>>[];
+
+    await _db.runTransaction<void>((tx) async {
+      result = null;
+      error = null;
+      attackerRows.clear();
+      defenderRows.clear();
+
+      final targetSnap = await tx.get(targetRef);
+      final baseSnap = await tx.get(baseRef);
+      final attackerSnap = await tx.get(attackerRef);
+      final borderSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in borderRefs) {
+        borderSnaps.add(await tx.get(ref));
+      }
+      final targetData = targetSnap.data();
+      final defenderId = targetData?['ownerId'] as String?;
+      DocumentReference<Map<String, dynamic>>? defenderRef;
+      DocumentSnapshot<Map<String, dynamic>>? defenderSnap;
+      if (defenderId != null && defenderId != uid) {
+        defenderRef = _playerRef(gameId, defenderId);
+        defenderSnap = await tx.get(defenderRef);
+      }
+
+      if (!attackerSnap.exists) {
+        error = 'Player not found.';
+        return;
+      }
+      final baseData = baseSnap.data();
+      if (!baseSnap.exists ||
+          baseData?['ownerId'] != uid ||
+          GameRules.navalRadiusOf(_buildingTypeOf(baseData)) <= 0) {
+        error = 'You need a naval base here.';
+        return;
+      }
+      if (defenderId == null) {
+        error = "This province isn't owned by another player.";
+        return;
+      }
+      if (defenderId == uid) {
+        error = "You can't attack your own province.";
+        return;
+      }
+      if (!TerritoryTypes.isCoastal(targetId)) {
+        error = 'A navy can only attack coastal territories.';
+        return;
+      }
+
+      final now = ServerClock.now();
+      final readyAt = PlayerState.fromDoc(attackerSnap).attackReadyAt;
+      if (readyAt != null && now.isBefore(readyAt)) {
+        final secs = (readyAt.difference(now).inMilliseconds / 1000).ceil();
+        error = 'Your forces are still recovering '
+            '(${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')} left).';
+        return;
+      }
+
+      final navy = (baseData?['navy'] as num?)?.toDouble() ?? 0;
+      if (!GameRules.canAct(navy)) {
+        error = 'Your navy is too weak to attack.';
+        return;
+      }
+
+      final attackerPower = navy;
+      final defenseMultiplier =
+          GameRules.defenseMultiplier(_buildingTypeOf(targetData));
+      final defenderRaw = (targetData?['troops'] as num?)?.toDouble() ?? 0;
+      final defenderPower = defenderRaw * defenseMultiplier;
+      final won = attackerPower > defenderPower;
+
+      final attackedAt = Timestamp.fromDate(now);
+      final stamp = FieldValue.serverTimestamp();
+
+      if (won) {
+        final leftover = attackerPower - defenderPower;
+        final annexedTroops = max(1.0, (leftover / 2).floorToDouble());
+        final navyLeft = max(0.0, leftover - annexedTroops);
+        tx.update(baseRef, {'navy': navyLeft});
+        attackerRows.add({'id': baseId, 'before': navy, 'after': navyLeft});
+        defenderRows.add({
+          'id': targetId,
+          'before': defenderRaw,
+          'after': annexedTroops,
+          'target': true,
+        });
+
+        final hadBuilding = _buildingTypeOf(targetData) != 'none';
+        final incomeDelta = _buildingIncomeOf(targetData, targetId);
+        final shift = _shiftTrades(
+          tx,
+          borderSnaps,
+          fromOwner: defenderId,
+          toOwner: uid,
+          capturedBuildingType: _buildingTypeOf(targetData),
+        );
+        tx.update(targetRef, {
+          'ownerId': uid,
+          'troops': annexedTroops,
+          'troopsUpdatedAt': stamp,
+          'navy': 0,
+          'building': {'type': 'none', 'level': 0},
+        });
+        tx.update(attackerRef, {
+          ..._settledIncomeUpdate(
+            attackerSnap,
+            owned: _ownedCount(attackerSnap) + 1,
+            buildingIncome: _buildingIncome(attackerSnap) + shift.gain,
+            now: now,
+          ),
+          'lastAttackAt': attackedAt,
+          'victories': FieldValue.increment(1),
+          if (defenderSnap != null &&
+              defenderSnap.exists &&
+              _ownedCount(defenderSnap) - 1 <= 0)
+            'kills': FieldValue.increment(1),
+        });
+        if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
+          tx.update(
+            defenderRef,
+            _settledIncomeUpdate(
+              defenderSnap,
+              owned: _ownedCount(defenderSnap) - 1,
+              buildingIncome:
+                  _buildingIncome(defenderSnap) - incomeDelta - shift.loss,
+              now: now,
+            ),
+          );
+        }
+        result = AttackResult(
+          won: true,
+          attackerPower: attackerPower,
+          defenderPower: defenderPower,
+          fighterIds: [baseId],
+          powerAfter: leftover,
+          defenderPowerLeft: 0,
+          buildingDestroyed: hadBuilding,
+        );
+      } else {
+        final lost = attackerPower * GameRules.failedAttackLossShare;
+        final remaining = max(0.0, defenderPower - lost);
+        final keep = defenderPower <= 0 ? 0.0 : remaining / defenderPower;
+        final left = max(1.0, defenderRaw * keep);
+        final navyLeft = attackerPower - lost;
+        tx.update(baseRef, {'navy': navyLeft});
+        attackerRows.add({'id': baseId, 'before': navy, 'after': navyLeft});
+        tx.update(targetRef, {'troops': left, 'troopsUpdatedAt': stamp});
+        defenderRows.add({
+          'id': targetId,
+          'before': defenderRaw,
+          'after': left,
+          'target': true,
+        });
+        tx.update(attackerRef, {'lastAttackAt': attackedAt});
+        if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
+          tx.update(defenderRef, {'victories': FieldValue.increment(1)});
+        }
+        result = AttackResult(
+          won: false,
+          attackerPower: attackerPower,
+          defenderPower: defenderPower,
+          fighterIds: [baseId],
+          powerAfter: navyLeft,
+          defenderPowerLeft: left,
+        );
+      }
+
+      final r = result;
+      if (r != null) {
+        tx.set(_gameRef(gameId).collection('events').doc(), {
+          'type': 'attack',
+          'naval': true,
+          'actorId': uid,
+          'actorName': _nameOf(attackerSnap),
+          'actorColor': _colorOf(attackerSnap),
+          'attackerId': uid,
+          'defenderId': defenderId,
+          'targetId': targetId,
+          'won': r.won,
+          'fighterIds': r.fighterIds,
+          'defenderSupportIds': r.defenderSupportIds,
+          'at': FieldValue.serverTimestamp(),
+        });
+        if (r.won &&
+            defenderSnap != null &&
+            defenderSnap.exists &&
+            _ownedCount(defenderSnap) - 1 <= 0) {
+          _logEvent(tx, gameId, 'eliminated', {
+            'actorId': uid,
+            'actorName': _nameOf(attackerSnap),
+            'actorColor': _colorOf(attackerSnap),
+            'victimId': defenderId,
+            'victimName': _nameOf(defenderSnap),
+            'victimColor': _colorOf(defenderSnap),
+            'targetId': targetId,
+          });
+        }
+        final report = {
+          'type': 'attack',
+          'naval': true,
+          'attackerId': uid,
+          'defenderId': defenderId,
+          'targetId': targetId,
+          'won': r.won,
+          'attackerPower': attackerPower,
+          'defenderPower': defenderPower,
+          'defenseMultiplier': defenseMultiplier,
+          'targetBuilding': _buildingTypeOf(targetData),
+          'attackers': attackerRows,
+          'defenders': defenderRows,
+          'at': FieldValue.serverTimestamp(),
+        };
+        tx.set(attackerRef.collection('updates').doc(), report);
+        tx.set(_playerRef(gameId, defenderId).collection('updates').doc(), report);
+      }
+    });
+
+    final failure = error;
+    if (failure != null) throw GameActionException(failure);
+    final outcome = result;
+    if (outcome == null) throw const GameActionException('Attack failed.');
+    return outcome;
   }
 
   /// [uid] attacks [targetId].
@@ -944,6 +1339,7 @@ class FirestoreService {
           borderSnaps,
           fromOwner: defenderId,
           toOwner: uid,
+          capturedBuildingType: _buildingTypeOf(targetData),
         );
         tx.update(targetRef, {
           'ownerId': uid,
@@ -1113,6 +1509,105 @@ class FirestoreService {
     final outcome = result;
     if (outcome == null) throw const GameActionException('Attack failed.');
     return outcome;
+  }
+
+  /// Claims the unclaimed coastal province [provinceId] with the naval base
+  /// in [baseId] (the caller checks the range). Costs [GameRules.claimCost]
+  /// gold and 1 navy, which becomes the new province's 1 power. Like a land
+  /// claim it neither waits for nor starts the attack cooldown. Throws
+  /// [GameActionException] if it isn't allowed.
+  Future<void> navalClaim({
+    required String gameId,
+    required String uid,
+    required String baseId,
+    required String provinceId,
+    required Iterable<String> neighborIds,
+  }) async {
+    final provinceRef = _provincesRef(gameId).doc(provinceId);
+    final baseRef = _provincesRef(gameId).doc(baseId);
+    final playerRef = _playerRef(gameId, uid);
+    final borderRefs = [
+      for (final id in neighborIds.toSet())
+        if (id != provinceId) _provincesRef(gameId).doc(id),
+    ];
+
+    final error = await _db.runTransaction<String?>((tx) async {
+      final provinceSnap = await tx.get(provinceRef);
+      final baseSnap = await tx.get(baseRef);
+      final playerSnap = await tx.get(playerRef);
+      final borderSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in borderRefs) {
+        borderSnaps.add(await tx.get(ref));
+      }
+
+      final data = provinceSnap.data();
+      final baseData = baseSnap.data();
+      if (!playerSnap.exists) return 'Player not found.';
+      if (!baseSnap.exists ||
+          baseData?['ownerId'] != uid ||
+          GameRules.navalRadiusOf(_buildingTypeOf(baseData)) <= 0) {
+        return 'You need a naval base here.';
+      }
+      if (data?['ownerId'] != null) return 'This province is already owned.';
+      if (!TerritoryTypes.isCoastal(provinceId)) {
+        return 'A navy can only claim coastal territories.';
+      }
+      final navy = (baseData?['navy'] as num?)?.toDouble() ?? 0;
+      if (!GameRules.canAct(navy)) return 'Your navy is too weak.';
+
+      final now = ServerClock.now();
+      final cost = GameRules.claimCost;
+      if (PlayerState.fromDoc(playerSnap).goldAt(now) < cost) {
+        return 'Not enough gold.';
+      }
+
+      final stamp = FieldValue.serverTimestamp();
+      tx.update(baseRef, {'navy': navy - 1});
+      if (provinceSnap.exists) {
+        tx.update(provinceRef, {
+          'ownerId': uid,
+          'troops': 1,
+          'troopsUpdatedAt': stamp,
+          'navy': 0,
+          'building': {'type': 'none', 'level': 0},
+        });
+      } else {
+        tx.set(provinceRef, {
+          'ownerId': uid,
+          'troops': 1,
+          'troopsUpdatedAt': stamp,
+          'navy': 0,
+          'building': {'type': 'none', 'level': 0},
+        });
+      }
+      final shift = _shiftTrades(
+        tx,
+        borderSnaps,
+        fromOwner: null,
+        toOwner: uid,
+      );
+      tx.update(playerRef, {
+        ..._settledIncomeUpdate(
+          playerSnap,
+          owned: _ownedCount(playerSnap) + 1,
+          buildingIncome:
+              _buildingIncome(playerSnap) +
+                  _buildingIncomeOf(data, provinceId) +
+                  shift.gain,
+          now: now,
+          spend: cost.toDouble(),
+        ),
+      });
+      _logEvent(tx, gameId, 'annex', {
+        'actorId': uid,
+        'actorName': _nameOf(playerSnap),
+        'actorColor': _colorOf(playerSnap),
+        'targetId': provinceId,
+      });
+      return null;
+    });
+
+    if (error != null) throw GameActionException(error);
   }
 
   /// Buys a bordering unclaimed province for [GameRules.claimCost] gold.
@@ -1287,6 +1782,9 @@ class FirestoreService {
 
     // Markets earn for the bordering territories the player owns right now,
     // so their 'trades' count is recomputed too.
+    final typeOf = {
+      for (final doc in ownedDocs.docs) doc.id: _buildingTypeOf(doc.data()),
+    };
     final batch = _db.batch();
     var tradeFixes = 0;
     var income = 0.0;
@@ -1298,7 +1796,11 @@ class FirestoreService {
         if (def != null && def.tradesWithNeighbors) {
           final neighbors =
               (building['neighbors'] as List?)?.cast<String>() ?? const [];
-          final trades = neighbors.where(ownedIds.contains).length;
+          final trades = neighbors
+              .where((n) =>
+                  ownedIds.contains(n) &&
+                  def.countsAsPartner(typeOf[n] ?? 'none'))
+              .length;
           if (trades != ((building['trades'] as num?)?.toInt() ?? 0)) {
             batch.update(doc.reference, {'building.trades': trades});
             tradeFixes++;

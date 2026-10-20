@@ -24,6 +24,9 @@ enum BuildSite {
   /// Island archipelagos only.
   archipelago,
 
+  /// Mountainous territories only (see TerritoryTypes.mountainous).
+  mountainous,
+
   /// Only territories that a rule in building_overrides.dart explicitly
   /// allows (oil fields, diamond mines).
   producer,
@@ -75,6 +78,15 @@ class BuildingDef {
   /// width (a missile silo); 0 = it can't.
   final double missileRadius;
 
+  /// How far this building's navy can attack, as a fraction of the map
+  /// width (a naval base); 0 = it has no navy.
+  final double navalRadius;
+
+  /// Ids of buildings this one needs on a bordering territory of the same
+  /// owner (an oil refinery needs a rig). Its income is 0 while none of them
+  /// is there. Empty = no such need.
+  final Set<String> suppliedBy;
+
   /// Icon of the USE button shown beside Manage. Null = no use button.
   final IconData? useIcon;
 
@@ -96,20 +108,34 @@ class BuildingDef {
     this.blocksAttacks = false,
     this.revealRadius = 0,
     this.missileRadius = 0,
+    this.navalRadius = 0,
+    this.suppliedBy = const {},
     this.useIcon,
     this.details = '',
   });
 
   /// True if what this building earns depends on how many bordering
   /// territories the owner holds (a market).
-  bool get tradesWithNeighbors => goldPerPartnerPerSec > 0;
+  bool get tradesWithNeighbors =>
+      goldPerPartnerPerSec > 0 || suppliedBy.isNotEmpty;
+
+  /// True if a bordering building of type [neighborType] counts as one of
+  /// this building's partners (a market counts every neighbor, a refinery
+  /// only its suppliers).
+  bool countsAsPartner(String neighborType) =>
+      suppliedBy.isEmpty || suppliedBy.contains(neighborType);
 
   /// Gold per second this building makes when it trades with [partners]
   /// bordering territories of its owner.
   /// [provinceId] applies that territory's rate from building_overrides.dart.
   double incomeFor(int partners, [String? provinceId]) =>
-      (goldPerSec + goldPerPartnerPerSec * (partners < 0 ? 0 : partners)) *
-      BuildingOverrides.rateOf(id, provinceId);
+      suppliedBy.isNotEmpty
+          ? goldPerSec *
+              (partners < 0 ? 0 : partners) *
+              BuildingOverrides.rateOf(id, provinceId)
+          : (goldPerSec +
+                  goldPerPartnerPerSec * (partners < 0 ? 0 : partners)) *
+              BuildingOverrides.rateOf(id, provinceId);
 
   /// Gold/sec gained per trading neighbor in [provinceId].
   double partnerRateFor(String? provinceId) =>
@@ -120,6 +146,10 @@ class BuildingDef {
   String effectLabelFor(int partners, [String? provinceId]) {
     if (effect != null) return effect!;
     final rate = BuildingOverrides.rateOf(id, provinceId);
+    if (suppliedBy.isNotEmpty) {
+      if (partners <= 0) return 'No supply: needs a bordering rig';
+      return '+${_trim(incomeFor(partners, provinceId) * 60)} gold/min';
+    }
     if (tradesWithNeighbors) {
       if (partners <= 0) {
         return '+${_trim(goldPerPartnerPerSec * rate * 60)} gold/min per neighbor';
@@ -256,6 +286,32 @@ class GameRules {
         'oil-producing territories can build it, and richer oil pays more.',
   );
 
+  /// Needs a bordering oil rig or oil field of the same owner. Earns gold per
+  /// bordering supplier, and nothing while none is there (never built, destroyed or captured).
+  static const BuildingDef oilRefinery = BuildingDef(
+    id: 'oil_refinery',
+    name: 'Oil refinery',
+    icon: Icons.propane_tank,
+    cost: 100,
+    goldPerSec: 0.0030, // per bordering rig or oil field
+    suppliedBy: {'offshore_rig', 'oil_field'},
+    details: 'Refines the oil of bordering offshore rigs and oil fields that '
+        'you own, earning gold for each one. If every bordering rig is '
+        'destroyed or lost, it earns nothing until one is built again.',
+  );
+
+  /// Island archipelagos only.
+  static const BuildingDef islandResort = BuildingDef(
+    id: 'island_resort',
+    name: 'Island resort',
+    icon: Icons.beach_access,
+    cost: 150,
+    goldPerSec: 0.0060,
+    site: BuildSite.archipelago,
+    details: 'A costly tourist resort with a high income. Only island '
+        'territories can build it.',
+  );
+
   /// Diamond-producing territories only.
   static const BuildingDef diamondMine = BuildingDef(
     id: 'diamond_mine',
@@ -342,12 +398,26 @@ class GameRules {
   static const BuildingDef radar = BuildingDef(
     id: 'radar',
     name: 'Radar',
-    icon: Icons.satellite_alt,
+    icon: Icons.settings_input_antenna,
     cost: 90,
     revealRadius: 0.06,
     effect: 'Reveals nearby area',
     details: 'Shows the buildings and power of every territory inside its '
         'range. Select the radar on the map to see the range.',
+  );
+
+  /// A radar with a much larger range; mountain territories only.
+  static const BuildingDef highAltitudeRadar = BuildingDef(
+    id: 'high_altitude_radar',
+    name: 'High altitude radar',
+    icon: Icons.wifi_tethering,
+    cost: 180,
+    site: BuildSite.mountainous,
+    revealRadius: 0.12,
+    effect: 'Reveals a wide area',
+    details: 'A radar with double the range. Shows the buildings and power of '
+        'every territory inside its range. Can only be built in mountainous '
+        'territories. Select it on the map to see the range.',
   );
 
   static const BuildingDef barracks = BuildingDef(
@@ -375,6 +445,39 @@ class GameRules {
         'and removes 20 power. Select the silo on the map to see the range.',
   );
 
+  /// Fires the base's navy at coastal enemy territories inside its range.
+  /// Navy is bought in the Reinforce window (it is much costlier than land
+  /// power) and is shown in blue next to the power on the map.
+  static const BuildingDef navalBase = BuildingDef(
+    id: 'naval_base',
+    name: 'Naval base',
+    icon: Icons.directions_boat,
+    cost: 140,
+    site: BuildSite.coastal,
+    navalRadius: 0.10,
+    useIcon: Icons.sailing,
+    effect: 'Navy attacks in range',
+    details: 'Holds a navy (up to 200 power, bought in Reinforce) that can '
+        'attack coastal enemy territories inside its range, even without a '
+        'border, or claim unclaimed coastal territories there (costs gold and '
+        '1 navy). Select the base and press the blue button. A naval attack '
+        'starts the attack cooldown.',
+  );
+
+  /// Blue used for everything naval.
+  static const Color navyColor = Color(0xFF2E7BEA);
+
+  /// Most navy power a single naval base can hold.
+  static const double maxNavy = 200;
+
+  /// Ships bought in the Reinforce window of a naval base. Much costlier per
+  /// point of power than land units (2.0 / 1.8 / 1.6 gold per power).
+  static const List<UnitDef> navyUnits = [
+    UnitDef(id: 'patrol_boat', name: 'Patrol boat', power: 5, cost: 30),
+    UnitDef(id: 'destroyer', name: 'Destroyer', power: 10, cost: 55),
+    UnitDef(id: 'cruiser', name: 'Cruiser', power: 20, cost: 100),
+  ];
+
   /// Gold a missile launch costs.
   static const int missileCost = 100;
 
@@ -390,6 +493,8 @@ class GameRules {
     fishingHarbor,
     offshoreRig,
     oilField,
+    oilRefinery,
+    islandResort,
     diamondMine,
     uraniumMine,
     silverMine,
@@ -397,8 +502,10 @@ class GameRules {
     wall,
     watchtower,
     radar,
+    highAltitudeRadar,
     barracks,
     missileSilo,
+    navalBase,
   ];
 
   /// True if [building] may be built in the province [provinceId], which
@@ -419,6 +526,8 @@ class GameRules {
           if (!TerritoryTypes.isCoastal(provinceId)) return false;
         case BuildSite.archipelago:
           if (!TerritoryTypes.isIslandArchipelago(provinceId)) return false;
+        case BuildSite.mountainous:
+          if (!TerritoryTypes.isMountainous(provinceId)) return false;
         case BuildSite.producer:
           return false; // only a rule with allowed: true opens it
       }
@@ -457,6 +566,14 @@ class GameRules {
   /// Missile range of a building as a fraction of the map width (0 = none).
   static double missileRadiusOf(String buildingType) =>
       buildingById(buildingType)?.missileRadius ?? 0;
+
+  /// True if some building (a refinery) needs [buildingType] next to it.
+  static bool suppliesOthers(String buildingType) =>
+      buildings.any((b) => b.suppliedBy.contains(buildingType));
+
+  /// Naval range of a building as a fraction of the map width (0 = none).
+  static double navalRadiusOf(String buildingType) =>
+      buildingById(buildingType)?.navalRadius ?? 0;
 
   /// True for a building (barracks) that joins bordering provinces' attacks.
   static bool supportsAttacks(String buildingType) =>

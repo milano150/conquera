@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../config/game_rules.dart';
 import '../models/province.dart';
 import '../theme/conquera_theme.dart';
 
@@ -471,6 +472,10 @@ class MapBadge {
   /// 0 means "nothing to show".
   final int power;
 
+  /// Navy power of a naval base (drawn in blue as power/navy); null = not a
+  /// naval base.
+  final int? navy;
+
   /// How big the province is, in map units (about the width of its bounding
   /// box). Small countries get small badges, or only a dot when zoomed out.
   final double extent;
@@ -485,6 +490,7 @@ class MapBadge {
     required this.anchor,
     this.icon,
     this.power = 0,
+    this.navy,
     this.extent = double.infinity,
     this.color,
     this.opacity = 1,
@@ -496,12 +502,13 @@ class MapBadge {
       other.anchor == anchor &&
       other.icon == icon &&
       other.power == power &&
+      other.navy == navy &&
       other.extent == extent &&
       other.color == color &&
       other.opacity == opacity;
 
   @override
-  int get hashCode => Object.hash(anchor, icon, power, extent, color, opacity);
+  int get hashCode => Object.hash(anchor, icon, power, navy, extent, color, opacity);
 }
 
 /// The badge layer: a building icon in the centre of each province that
@@ -595,17 +602,30 @@ class BadgePainter extends CustomPainter {
     });
   }
 
-  TextPainter _powerPainter(int power, double size, Color color) {
-    final key = '$power|${size.toStringAsFixed(2)}|${color.hashCode}';
+  TextPainter _powerPainter(int power, int? navy, double size, Color color) {
+    final key = '$power|$navy|${size.toStringAsFixed(2)}|${color.hashCode}';
     return _powerCache.putIfAbsent(key, () {
+      final style = ConqueraText.label.copyWith(
+        fontSize: size,
+        fontWeight: FontWeight.w600,
+        color: color,
+      );
       return TextPainter(
         text: TextSpan(
           text: '$power',
-          style: ConqueraText.label.copyWith(
-            fontSize: size,
-            fontWeight: FontWeight.w600,
-            color: color,
-          ),
+          style: style,
+          children: [
+            if (navy != null) ...[
+              TextSpan(text: '/'),
+              // The navy number is blue; it keeps the badge's fade.
+              TextSpan(
+                text: '$navy',
+                style: style.copyWith(
+                  color: GameRules.navyColor.withAlpha(color.alpha),
+                ),
+              ),
+            ],
+          ],
         ),
         textDirection: TextDirection.ltr,
       )..layout();
@@ -654,7 +674,8 @@ class BadgePainter extends CustomPainter {
 
       final powerMapSize =
           min(powerSize, max(badge.extent * _powerShare, _tinyPowerPx / scale));
-      final showNumber = showPower && badge.power > 0;
+      final showNumber =
+          showPower && (badge.power > 0 || badge.navy != null);
 
       canvas.save();
       canvas.translate(badge.anchor.dx, badge.anchor.dy);
@@ -676,7 +697,7 @@ class BadgePainter extends CustomPainter {
 
       if (showNumber) {
         final numberColor = color.withAlpha((_inkAlpha * powerOpacity).round());
-        final painter = _powerPainter(badge.power, powerMapSize, numberColor);
+        final painter = _powerPainter(badge.power, badge.navy, powerMapSize, numberColor);
         // Under the icon, or centred when there's no icon to sit under.
         final top = iconFits ? iconMapSize / 2 : -painter.height / 2;
         painter.paint(canvas, Offset(-painter.width / 2, top));

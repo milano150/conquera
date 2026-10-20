@@ -212,7 +212,9 @@ class _IncomeScreenState extends State<IncomeScreen> {
       final def = p.hasBuilding ? GameRules.buildingById(p.buildingType) : null;
       final partners = widget
           .neighborsOf(p.id)
-          .where((n) => all[n]?.ownerId == widget.uid)
+          .where((n) =>
+              all[n]?.ownerId == widget.uid &&
+              (def?.countsAsPartner(all[n]?.buildingType ?? 'none') ?? true))
           .length;
       earnings.add(_Earning(
         id: p.id,
@@ -498,7 +500,9 @@ class _IncomeScreenState extends State<IncomeScreen> {
     final detail = StringBuffer('tax ${_amount(e.tax * 3600)}');
     if (def != null && e.buildingIncome > 0) {
       detail.write('  +  ${def.name.toLowerCase()} ${_amount(e.buildingIncome * 3600)}');
-      if (def.tradesWithNeighbors) {
+      if (def.suppliedBy.isNotEmpty) {
+        detail.write(' (${e.partners} rig${e.partners == 1 ? '' : 's'})');
+      } else if (def.tradesWithNeighbors) {
         detail.write(' (${e.partners} partner${e.partners == 1 ? '' : 's'})');
       }
     }

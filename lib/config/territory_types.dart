@@ -45,6 +45,17 @@ class TerritoryTypes {
     'TW',
   };
 
+  /// Mountainous territories. Only these may build a high altitude radar.
+  /// Edit freely.
+  static const Set<String> mountainous = {
+    'AD', 'AF', 'AL', 'AM', 'AT', 'BO', 'BT', 'CH', 'CL', 'CN', 'CO', 'EC',
+    'ES', 'FR', 'GE', 'IR', 'IT', 'JP', 'KG', 'LS', 'ME', 'MK', 'MN', 'NO',
+    'NP', 'PE', 'PK', 'SI', 'SK', 'TJ', 'TR', 'XK',
+  };
+
+  static bool isMountainous(String provinceId) =>
+      mountainous.contains(provinceId);
+
   static bool isLandlocked(String provinceId) => landlocked.contains(provinceId);
 
   static bool isCoastal(String provinceId) => !isLandlocked(provinceId);
