@@ -16,8 +16,12 @@ import 'server_clock.dart';
 /// expired, once a territory changed owner or got a building, or once the
 /// creator holds less gold than promised. Accepting is one transaction that
 /// moves every territory and all the gold and fixes both players' income.
-/// Territories WITH a building can't be traded (so market / refinery income
-/// never gets stale). Troops stay on the territory.
+/// A territory WITH a building can't change hands (so market / refinery
+/// income never gets stale). The creator's own territories with buildings
+/// can't be offered. The receiver's territories are NOT checked when the
+/// offer is created, so the creator never learns where the receiver has
+/// buildings: the receiver has to destroy the building before accepting.
+/// Troops stay on the territory.
 class TradeService {
   TradeService({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
@@ -67,19 +71,21 @@ class TradeService {
   ) {
     if (o.expiredAt(now)) return TradeProblem.expired;
     TradeProblem? found;
-    void check(Iterable<String> ids, String owner) {
+    void check(Iterable<String> ids, String owner, bool buildingBlocks) {
       for (final id in ids) {
         final p = provs[id];
         if (p == null || p.ownerId != owner) {
           found ??= TradeProblem.ownerChanged;
-        } else if (p.hasBuilding) {
+        } else if (buildingBlocks && p.hasBuilding) {
           found ??= TradeProblem.buildingAppeared;
         }
       }
     }
 
-    check(o.giveProvinces, o.fromId);
-    check(o.takeProvinces, o.toId);
+    check(o.giveProvinces, o.fromId, true);
+    // Buildings on the receiver's side are not a "problem" the creator can
+    // see; the receiver clears them (see [buildingsToClear]).
+    check(o.takeProvinces, o.toId, false);
     if (found != null) return found;
     final creator = players[o.fromId];
     if (creator == null || creator.goldAt(now) < o.giveGold) {
@@ -87,6 +93,18 @@ class TradeService {
     }
     return null;
   }
+
+  /// The receiver's territories in [o] that still have a building. Only the
+  /// receiver's screen may use this: the creator must never see it.
+  static List<String> buildingsToClear(
+    TradeOffer o,
+    Map<String, ProvinceState> provs,
+  ) =>
+      [
+        for (final id in o.takeProvinces)
+          if (provs[id]?.ownerId == o.toId && (provs[id]?.hasBuilding ?? false))
+            id,
+      ];
 
   bool _hasBuilding(Map<String, dynamic>? province) {
     final b = province?['building'];
@@ -167,22 +185,24 @@ class TradeService {
           'The other player must keep at least one territory.');
     }
 
-    Future<void> verify(List<String> ids, String owner) async {
+    Future<void> verify(List<String> ids, String owner,
+        {required bool blockBuildings}) async {
       for (final id in ids) {
         final snap = await _provinces(gameId).doc(id).get();
         final data = snap.data();
         if (data?['ownerId'] != owner) {
           throw const GameActionException('A territory changed owner.');
         }
-        if (_hasBuilding(data)) {
+        // Never reveal a building on the receiver's side.
+        if (blockBuildings && _hasBuilding(data)) {
           throw const GameActionException(
               "Territories with buildings can't be traded.");
         }
       }
     }
 
-    await verify(giveProvinces, uid);
-    await verify(takeProvinces, toId);
+    await verify(giveProvinces, uid, blockBuildings: true);
+    await verify(takeProvinces, toId, blockBuildings: false);
 
     await _offers(gameId).add({
       'participants': [uid, toId],
@@ -262,19 +282,21 @@ class TradeService {
 
       if (!fromSnap.exists || !toSnap.exists) return 'A player has left.';
 
-      String? bad(List<String> ids, String owner) {
+      String? bad(List<String> ids, String owner, String onBuilding) {
         for (final id in ids) {
           final data = provSnaps[id]?.data();
           if (data == null || data['ownerId'] != owner) {
             return 'A territory changed owner.';
           }
-          if (_hasBuilding(data)) return 'A territory got a building.';
+          if (_hasBuilding(data)) return onBuilding;
         }
         return null;
       }
 
-      final problem = bad(offer.giveProvinces, offer.fromId) ??
-          bad(offer.takeProvinces, offer.toId);
+      final problem = bad(offer.giveProvinces, offer.fromId,
+              'This offer is no longer available.') ??
+          bad(offer.takeProvinces, offer.toId,
+              'Destroy the buildings on the territories you give first.');
       if (problem != null) return problem;
 
       if (PlayerState.fromDoc(fromSnap).goldAt(now) < offer.giveGold) {

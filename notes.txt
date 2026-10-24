@@ -1,56 +1,21 @@
 next additions
 
 
-pre beta 1.0
-- sidebar buttons
-- more buildings and stuff.
-- NO INTEL MODE 
-- dynamic sweep for other players
-- BALANCE ECONOMY
-- fix dissapearing troops glitch
+pre beta 1.1
+
+- main screen overhaul
+- add gold cap 
+- fix multiple radii glitch
+- BALANCE EVERYTHING
+- better how to
+- complete ui revamp
+- better trade menu
 
 
-lib/
-├── config/
-│   ├── country_data.dart
-│   ├── dev_session.dart
-│   ├── game_rules.dart
-│   ├── player_colors.dart
-│   ├── sea_links.dart
-│   └── territory_types.dart
-├── models/
-│   ├── attack_result.dart
-│   ├── player_state.dart
-│   ├── province_state.dart
-│   └── province.dart
-├── painters/
-│   └── map_painter.dart
-├── screens/
-│   ├── home_screen.dart
-│   ├── join_screen.dart
-│   └── map_screen.dart
-├── services/
-│   ├── border_finder.dart
-│   ├── firestore_service.dart
-│   ├── map_parse_result.dart
-│   └── svg_map_parser.dart
-├── state/
-│   └── map_controller.dart
-├── theme/
-│   └── conquera_theme.dart
-├── widgets/
-│   ├── attack_dialog.dart
-│   ├── blur_route.dart
-│   ├── conquera_text_field.dart
-│   ├── country_info_panel.dart
-│   ├── fade_route.dart
-│   ├── gold_amount.dart
-│   ├── leaderboard_panel.dart
-│   ├── map_viewport.dart
-│   ├── player_tag.dart
-│   ├── player_top_bar.dart
-│   ├── province_detail_dialog.dart
-│   ├── stat_block.dart
-│   └── world_sidebar.dart
-├── firebase_options.dart
-└── main.dart
+
+create new buildings with appropriate icons
+
+- Mines: defense building which is one time use. when attacked, kills all troops involved and loses. not visible on radars
+- Army Camp: building that removes 5 minutes off the attack cooldown per building built.
+- Dome: building that intercepts all missiles that are found within its range. when intercepted send info to log "{countr} intercepted missile from {country}"
+
