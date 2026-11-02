@@ -125,7 +125,7 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
-                              vertical: 8,
+                              vertical: 3,
                             ),
                             child: _GoldReadout(
                               gold: player?.goldAt(ServerClock.now()),
@@ -146,7 +146,7 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
   }
 }
 
-/// Coin, current gold, and income rate in one line.
+/// Coin and current gold, with the income rate underneath.
 class _GoldReadout extends StatelessWidget {
   final double? gold;
   final double? rate;
@@ -177,26 +177,23 @@ class _GoldReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        const GoldIcon(size: 18),
-        const SizedBox(width: ConqueraSpace.sm),
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: gold == null ? '--' : _thousands(gold!),
-                style: ConqueraText.figure,
-              ),
-              if (rate != null)
-                TextSpan(
-                  text: '  ${_rateLabel(rate!)}',
-                  style: ConqueraText.label,
-                ),
-            ],
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const GoldIcon(size: 18),
+            const SizedBox(width: ConqueraSpace.sm),
+            Text(
+              gold == null ? '--' : _thousands(gold!),
+              style: ConqueraText.figure,
+            ),
+          ],
         ),
+        if (rate != null)
+          Text(_rateLabel(rate!), style: ConqueraText.label),
       ],
     );
   }

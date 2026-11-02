@@ -76,6 +76,7 @@ class _AttackDialogState extends State<AttackDialog> {
   late final List<_Line> _defenderLines;
   late final PlayerState? _me;
   late final PlayerState? _defender;
+  late final bool _trapped;
 
   /// The defender's power and buildings stay hidden (fog of war) until the
   /// attack is confirmed.
@@ -154,6 +155,7 @@ class _AttackDialogState extends State<AttackDialog> {
     final targetBuilding = target?.buildingType ?? 'none';
     final defenseMultiplier = GameRules.defenseMultiplier(targetBuilding);
     final defenseDef = GameRules.buildingById(targetBuilding);
+    _trapped = GameRules.isTrap(targetBuilding);
 
     // The defender's barracks that border the target defend it too.
     var supportPower = 0.0;
@@ -199,6 +201,7 @@ class _AttackDialogState extends State<AttackDialog> {
   /// Each side's share of the total power, for the bar.
   double get _powerShare {
     if (!_revealed) return 0.5;
+    if (_trapped && _confirming) return 0.0;
     final total = _attackPower + _defendPower;
     return total <= 0 ? 0.5 : _attackPower / total;
   }
@@ -289,6 +292,7 @@ class _AttackDialogState extends State<AttackDialog> {
                         ),
                         power: _defendPower,
                         hidden: !_revealed,
+                        skull: _revealed && _confirming && _trapped,
                         lines: _revealed
                             ? _defenderLines
                             : [_Line(widget.targetName)],
@@ -346,6 +350,7 @@ class _AttackDialogState extends State<AttackDialog> {
     required List<_Line> lines,
     Color? powerColor,
     bool hidden = false,
+    bool skull = false,
   }) {
     return Column(
       crossAxisAlignment: align,
@@ -353,7 +358,7 @@ class _AttackDialogState extends State<AttackDialog> {
         tag,
         const SizedBox(height: ConqueraSpace.xs),
         Text(
-          hidden ? '?' : '${power.floor()}',
+          hidden ? '?' : (skull ? '\u{1F480}' : '${power.floor()}'),
           style: ConqueraText.figure.copyWith(fontSize: 36, color: powerColor),
         ),
         for (final line in lines)

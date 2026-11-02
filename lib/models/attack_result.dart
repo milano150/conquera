@@ -31,6 +31,10 @@ class AttackResult {
   /// Win: the annexed province had a building, and it was destroyed.
   final bool buildingDestroyed;
 
+  /// The defender's mines blew up the attack (the defender's power is
+  /// hidden behind a skull instead of a number).
+  final bool trapped;
+
   const AttackResult({
     required this.won,
     required this.attackerPower,
@@ -40,5 +44,6 @@ class AttackResult {
     required this.powerAfter,
     required this.defenderPowerLeft,
     this.buildingDestroyed = false,
+    this.trapped = false,
   });
 }

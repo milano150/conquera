@@ -41,6 +41,9 @@ class ProvinceDetailDialog extends StatefulWidget {
 
   /// True if a radar lets the player see this province's power and building.
   final bool canSee;
+
+  /// Like [canSee], but mines stay hidden from everyone but their owner.
+  final bool canSeeBuilding;
   final ValueListenable<Map<String, ProvinceState>> provinceStates;
   final ValueListenable<Map<String, PlayerState>> players;
   final FirestoreService firestore;
@@ -53,6 +56,7 @@ class ProvinceDetailDialog extends StatefulWidget {
     required this.provinceName,
     required this.neighborIds,
     this.canSee = false,
+    this.canSeeBuilding = false,
     required this.provinceStates,
     required this.players,
     required this.firestore,
@@ -340,7 +344,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               StatBlock(
                 label: 'Building',
                 child: Text(
-                  ownedByMe || widget.canSee
+                  ownedByMe || widget.canSeeBuilding
                       ? (province?.buildingLabel ?? 'None')
                       : '?',
                   style: ConqueraText.value,
@@ -695,7 +699,7 @@ class _AmountSlider extends StatelessWidget {
   }
 }
 
-/// Small round (icon) or pill (label) button beside the slider.
+/// Small squarish outlined (icon or label) button beside the slider.
 class _StepButton extends StatelessWidget {
   final IconData? icon;
   final String? label;
@@ -712,19 +716,22 @@ class _StepButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final on = onTap != null;
-    final c = on ? color : ConqueraColors.muted.withAlpha(110);
+    // Matches the shared hollow buttons (Destroy / Reinforce): transparent,
+    // 1px outline, 6px corners.
+    final c = on ? ConqueraColors.ink : ConqueraColors.muted.withAlpha(150);
+    final border = on ? ConqueraColors.ink : ConqueraColors.divider;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        height: 28,
-        constraints: const BoxConstraints(minWidth: 28),
-        padding: EdgeInsets.symmetric(horizontal: label != null ? 8 : 0),
+        height: 30,
+        constraints: const BoxConstraints(minWidth: 30),
+        padding: EdgeInsets.symmetric(horizontal: label != null ? 10 : 0),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: on ? color.withAlpha(24) : Colors.transparent,
-          borderRadius: BorderRadius.circular(label != null ? 14 : 14),
-          border: Border.all(color: c.withAlpha(on ? 170 : 90)),
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: border),
         ),
         child: icon != null
             ? Icon(icon, size: 16, color: c)
@@ -732,7 +739,7 @@ class _StepButton extends StatelessWidget {
                 label!,
                 style: ConqueraText.label.copyWith(
                   color: c,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w500,
                   letterSpacing: 0.8,
                 ),
               ),
@@ -1063,7 +1070,7 @@ enum _Category {
 
 _Category _categoryOf(BuildingDef b) => switch (b.id) {
       'watchtower' || 'radar' || 'high_altitude_radar' => _Category.surveillance,
-      'fortress' || 'wall' => _Category.defense,
+      'fortress' || 'wall' || 'mines' || 'dome' => _Category.defense,
       'barracks' || 'missile_silo' || 'naval_base' => _Category.military,
       _ => _Category.production,
     };

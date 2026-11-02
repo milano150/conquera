@@ -87,6 +87,17 @@ class BuildingDef {
   /// is there. Empty = no such need.
   final Set<String> suppliedBy;
 
+  /// One-shot trap (mines): when the territory is attacked, every troop that
+  /// took part is wiped out, the attack fails and the building is used up.
+  final bool isTrap;
+
+  /// Invisible to radars and watchtowers: only the owner sees it.
+  final bool hiddenFromScouting;
+
+  /// Shields this territory and every bordering one (same owner) from
+  /// missiles (a dome).
+  final bool missileShield;
+
   /// Icon of the USE button shown beside Manage. Null = no use button.
   final IconData? useIcon;
 
@@ -110,6 +121,9 @@ class BuildingDef {
     this.missileRadius = 0,
     this.navalRadius = 0,
     this.suppliedBy = const {},
+    this.isTrap = false,
+    this.hiddenFromScouting = false,
+    this.missileShield = false,
     this.useIcon,
     this.details = '',
   });
@@ -382,6 +396,33 @@ class GameRules {
         'can no longer send troops to attacks or claims.',
   );
 
+  /// One-use trap: wipes out every troop of an attack on this territory.
+  /// Radars and watchtowers can't see it.
+  static const BuildingDef mines = BuildingDef(
+    id: 'mines',
+    name: 'Mines',
+    icon: Icons.dangerous,
+    cost: 45,
+    isTrap: true,
+    hiddenFromScouting: true,
+    effect: 'One-use trap, hidden',
+    details: 'A hidden trap. When an enemy attacks this territory, every troop '
+        'that took part in the attack is killed, the attack fails and the '
+        'mines are used up. Radars and watchtowers cannot see them.',
+  );
+
+  /// Blocks missiles aimed at this territory or any bordering one.
+  static const BuildingDef dome = BuildingDef(
+    id: 'dome',
+    name: 'Dome',
+    icon: Icons.umbrella,
+    cost: 130,
+    missileShield: true,
+    effect: 'Blocks missiles nearby',
+    details: 'Protects this territory and every bordering territory you own '
+        'from missile attacks. A missile that hits the shield is wasted.',
+  );
+
   /// Lifts the fog of war over every bordering territory.
   static const BuildingDef watchtower = BuildingDef(
     id: 'watchtower',
@@ -500,6 +541,8 @@ class GameRules {
     silverMine,
     fortress,
     wall,
+    mines,
+    dome,
     watchtower,
     radar,
     highAltitudeRadar,
@@ -554,6 +597,18 @@ class GameRules {
   /// 3.0 with a wall, 1.0 otherwise.
   static double defenseMultiplier(String buildingType) =>
       1 + (buildingById(buildingType)?.defenseBonus ?? 0);
+
+  /// True for a trap building (mines).
+  static bool isTrap(String buildingType) =>
+      buildingById(buildingType)?.isTrap ?? false;
+
+  /// True for a building that radars and watchtowers can't see (mines).
+  static bool hiddenFromScouting(String buildingType) =>
+      buildingById(buildingType)?.hiddenFromScouting ?? false;
+
+  /// True for a building (dome) that shields its surroundings from missiles.
+  static bool missileShield(String buildingType) =>
+      buildingById(buildingType)?.missileShield ?? false;
 
   /// True for a building (watchtower) that reveals bordering territories.
   static bool revealsNeighbors(String buildingType) =>

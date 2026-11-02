@@ -295,7 +295,7 @@ class _MapScreenState extends State<MapScreen>
   /// The pop-up text, 0..1.
   late final AnimationController _popupAnim = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 2400),
+    duration: const Duration(milliseconds: 2000),
   );
   _Popup? _popup;
 
@@ -305,6 +305,9 @@ class _MapScreenState extends State<MapScreen>
   /// drives the red alert at the bottom of the screen.
   bool _underAttack = false;
   String _alertDetail = '';
+
+  /// The province named in the alert; tapping the alert pans to it.
+  String? _alertTargetId;
 
   // --- Camera pan toward the war zone -----------------------------------
   /// Last viewport size, remembered so the camera can be moved from code.
@@ -587,6 +590,16 @@ class _MapScreenState extends State<MapScreen>
     return out;
   }
 
+  /// Like [_canSee], but mines are invisible to radars and watchtowers: only
+  /// their owner sees the building.
+  bool _canSeeBuilding(String id, [List<(Offset, double)>? radars]) {
+    final s = _provinceStates.value[id];
+    if (s == null) return false;
+    if (s.ownerId == _uid) return true;
+    if (GameRules.hiddenFromScouting(s.buildingType)) return false;
+    return _canSee(id, radars);
+  }
+
   /// Fog of war: you see your own provinces, every province that borders
   /// one of your watchtowers, and every province whose icon lies inside one
   /// of your radars' range.
@@ -717,7 +730,8 @@ class _MapScreenState extends State<MapScreen>
         badges.add(
           MapBadge(
             anchor: province.anchor,
-            power: revealed,
+            power: revealed < 0 ? 0 : revealed,
+            skull: revealed < 0, // -1 = mines
             extent: sqrt(province.bounds.width * province.bounds.height),
             color: _players.value[state.ownerId]?.color,
             opacity: _revealOpacity,
@@ -729,7 +743,7 @@ class _MapScreenState extends State<MapScreen>
       // Fog of war: only provinces you own or see with a radar show a
       // building and power.
       if (!_canSee(id, radars)) return;
-      final icon = state.hasBuilding
+      final icon = state.hasBuilding && _canSeeBuilding(id, radars)
           ? GameRules.buildingById(state.buildingType)?.icon
           : null;
       final power = (_frozenTroops.isEmpty
@@ -1231,8 +1245,23 @@ class _MapScreenState extends State<MapScreen>
         _hiddenIds = const {};
         _frozenTroops = const {};
       });
-      _showPopup(target, 'Failed to annex ', attackerColor);
-      _revealLeftover(target.id, result.defenderPowerLeft);
+      if (result.trapped) {
+        setState(() {
+          _popup = _Popup(
+            anchor: target.anchor,
+            lead: 'Blown up by mines',
+            name: '',
+            nameColor: ConqueraColors.danger,
+          );
+        });
+      } else {
+        _showPopup(target, 'Failed to annex ', attackerColor);
+      }
+      _revealLeftover(
+        target.id,
+        result.defenderPowerLeft,
+        skull: result.trapped,
+      );
     }
 
     // Keep the outlines up while the pop-up is read, then clear everything.
@@ -1243,8 +1272,13 @@ class _MapScreenState extends State<MapScreen>
 
   /// Shows the defender's remaining power on the map for a few seconds,
   /// then fades it away.
-  Future<void> _revealLeftover(String id, double left) async {
-    setState(() => _revealedPower = {id: left.floor()});
+  Future<void> _revealLeftover(
+    String id,
+    double left, {
+    bool skull = false,
+  }) async {
+    // -1 makes the badge draw a skull instead of a number.
+    setState(() => _revealedPower = {id: skull ? -1 : left.floor()});
     await _revealCtl.forward(from: 0);
     if (!mounted) return;
     setState(() => _revealedPower = const {});
@@ -1284,6 +1318,7 @@ class _MapScreenState extends State<MapScreen>
     final attacker = _players.value[e.attackerId]?.displayName ?? 'A player';
     setState(() {
       _underAttack = true;
+      _alertTargetId = target?.id;
       _alertDetail = target == null
           ? '$attacker is attacking you'
           : '$attacker is invading ${target.name}';
@@ -1323,7 +1358,8 @@ class _MapScreenState extends State<MapScreen>
     final players = _players.value;
     final attacker = players[e.attackerId];
     final defender = e.defenderId == null ? null : players[e.defenderId];
-    // An attack on this player: highlight the borders and fly to the war zone.
+    // An attack on this player: highlight the borders (the camera stays put;
+    // the alert can be tapped to fly there).
     final onMe = e.defenderId == _uid;
     final attackerColor = attacker?.color ?? ConqueraColors.accent;
     final defenderColor = defender?.color ?? ConqueraColors.muted;
@@ -1349,7 +1385,7 @@ class _MapScreenState extends State<MapScreen>
       );
     });
 
-    if (onMe || _cameraFollowsBattles) await _panToTarget(target);
+    if (_cameraFollowsBattles) await _panToTarget(target);
     await Future<void>.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
 
@@ -1407,72 +1443,62 @@ class _MapScreenState extends State<MapScreen>
     _endBattle();
   }
 
-  /// Small red "you are being attacked" banner at the bottom of the screen.
+  /// Minimal "X is invading Y" pill at the bottom of the screen. Tap it to
+  /// fly to the invaded province; the camera never moves on its own.
   Widget _attackAlert() {
     return Positioned(
       left: ConqueraSpace.md,
       right: ConqueraSpace.md,
       bottom: ConqueraSpace.md + MediaQuery.of(context).padding.bottom,
       child: IgnorePointer(
+        ignoring: !_underAttack,
         child: AnimatedOpacity(
           duration: const Duration(milliseconds: 140),
           curve: Curves.easeOut,
           opacity: _underAttack ? 1 : 0,
           child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: ConqueraSpace.md,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: ConqueraColors.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: ConqueraColors.danger, width: 1.5),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x2212324A),
-                    blurRadius: 10,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _panToAlert,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: ConqueraSpace.md,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: ConqueraColors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: ConqueraColors.divider),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x2212324A),
+                      blurRadius: 10,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
                         color: ConqueraColors.danger,
-                        width: 1.5,
+                        shape: BoxShape.circle,
                       ),
                     ),
-                    child: Icon(
-                      Icons.priority_high,
-                      color: ConqueraColors.danger,
-                      size: 18,
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        _alertDetail,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ConqueraText.name.copyWith(fontSize: 14),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'You are being attacked',
-                          style: ConqueraText.name.copyWith(
-                            fontSize: 16,
-                            color: ConqueraColors.danger,
-                          ),
-                        ),
-                        Text(_alertDetail, style: ConqueraText.label),
-                      ],
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1481,12 +1507,28 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
+  /// Tapping the alert: fly to the province being invaded.
+  void _panToAlert() {
+    final id = _alertTargetId;
+    final target = id == null ? null : _controller.provinceById(id);
+    if (target != null) _panToTarget(target);
+  }
+
   void _endBattle() {
     _pulse.stop();
     _fx.value = 0;
     setState(() {
       _battle = null;
       _underAttack = _eventQueue.any((q) => q.defenderId == _uid);
+      if (_underAttack) {
+        final next = _eventQueue.firstWhere((q) => q.defenderId == _uid);
+        final nextTarget = _controller.provinceById(next.targetId);
+        final who = _players.value[next.attackerId]?.displayName ?? 'A player';
+        _alertTargetId = nextTarget?.id;
+        _alertDetail = nextTarget == null
+            ? '$who is attacking you'
+            : '$who is invading ${nextTarget.name}';
+      }
       _colorOverrides = const {};
       _frozenTroops = const {};
       _hiddenIds = const {};
@@ -1711,7 +1753,26 @@ class _MapScreenState extends State<MapScreen>
     if (at != null && ServerClock.now().difference(at).inSeconds > 20) return;
     final to = _controller.provinceById(e.targetId);
     if (to == null) return;
+    if (e.intercepted) {
+      _playIntercept(to);
+      return;
+    }
     _playBomb(e, to);
+  }
+
+  /// A dome swallowed the missile: nothing shakes, a pop-up on the target
+  /// says so.
+  Future<void> _playIntercept(Province to) async {
+    if (_battleRunning) return;
+    final popup = _Popup(
+      anchor: to.anchor,
+      lead: 'Intercepted by dome',
+      name: '',
+      nameColor: ConqueraColors.danger,
+    );
+    setState(() => _popup = popup);
+    await _popupAnim.forward(from: 0);
+    if (mounted && identical(_popup, popup)) setState(() => _popup = null);
   }
 
   /// The hit territory shakes and flashes red right away; a pop-up names
@@ -1862,6 +1923,7 @@ class _MapScreenState extends State<MapScreen>
         provinceName: province.name,
         neighborIds: _controller.neighborsOf(province.id),
         canSee: _canSee(province.id),
+        canSeeBuilding: _canSeeBuilding(province.id),
         provinceStates: _provinceStates,
         players: _players,
         firestore: _firestore,
@@ -1889,8 +1951,9 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
-  /// The floating text above the attacked territory: it rises a little, and
-  /// fades in and out. Follows the territory as the map is panned/zoomed.
+  /// The text above the attacked territory: a square-cornered tag that fades
+  /// in and out quickly on the spot (no movement). Follows the territory as
+  /// the map is panned/zoomed.
   Widget _popupWidget(_Popup popup) {
     final t = _popupAnim.value;
     // Draw it on the copy of the world that is closest to the camera.
@@ -1903,31 +1966,30 @@ class _MapScreenState extends State<MapScreen>
       _transform.value,
       Offset(anchorX, popup.anchor.dy),
     );
-    final rise = 10 + 26 * Curves.easeOut.transform(t.clamp(0.0, 1.0).toDouble());
-    final opacity = t < 0.12
-        ? t / 0.12
-        : (t > 0.75 ? (1 - (t - 0.75) / 0.25) : 1.0);
-    final scale = 0.85 + 0.15 * Curves.easeOutBack.transform(min(1.0, t / 0.15));
+    // Fixed spot above the territory; only the opacity animates.
+    const lift = 14.0;
+    const fade = 0.07; // ~140 ms in and out of the 2 s total
+    final opacity = t < fade
+        ? t / fade
+        : (t > 1 - fade ? (1 - t) / fade : 1.0);
 
     return Stack(
       children: [
         Positioned(
           left: point.dx,
-          top: point.dy - rise,
+          top: point.dy - lift,
           child: FractionalTranslation(
             translation: const Offset(-0.5, -1),
             child: Opacity(
               opacity: opacity.clamp(0.0, 1.0).toDouble(),
-              child: Transform.scale(
-                scale: scale,
-                child: Container(
+              child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: ConqueraSpace.md,
                     vertical: ConqueraSpace.sm,
                   ),
                   decoration: BoxDecoration(
                     color: ConqueraColors.surface,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.zero,
                     border: Border.all(color: ConqueraColors.divider),
                     boxShadow: const [
                       BoxShadow(
@@ -1952,7 +2014,6 @@ class _MapScreenState extends State<MapScreen>
                     ),
                   ),
                 ),
-              ),
             ),
           ),
         ),
@@ -2332,7 +2393,7 @@ class _MapScreenState extends State<MapScreen>
                                 power: _canSee(selected.id)
                                     ? '${(selectedState?.troops ?? 0).floor()}'
                                     : '?',
-                                building: _canSee(selected.id)
+                                building: _canSeeBuilding(selected.id)
                                     ? (selectedState?.buildingLabel ?? 'None')
                                     : '?',
                                 onClose: _controller.clearSelection,

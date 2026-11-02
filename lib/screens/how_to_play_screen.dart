@@ -65,7 +65,7 @@ class HowToPlayScreen extends StatelessWidget {
     ),
     (
       'Defending',
-      'A fortress makes a territory 50% harder to invade. A wall triples '
+      'A fortress makes a territory 50% harder to invade. Mines are a hidden one-use trap that kills every troop of an attack on them. A dome blocks missiles aimed at its territory and its neighbors. A wall triples '
           'its power when invaded, but a territory with a wall cannot '
           'attack or claim, so walls suit borders you only want to hold.',
     ),

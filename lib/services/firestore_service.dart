@@ -170,6 +170,18 @@ class FirestoreService {
         );
   }
 
+  /// One-shot list of every player in the game, sorted by name. BETA: feeds
+  /// the "log in as any player" picker on the home screen.
+  Future<List<PlayerState>> listPlayers({required String gameId}) async {
+    final snap = await _gameRef(gameId).collection('players').get();
+    final players = [for (final d in snap.docs) PlayerState.fromDoc(d)];
+    players.sort(
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+    );
+    return players;
+  }
+
   // ---------------------------------------------------------------------
   // Small readers
   // ---------------------------------------------------------------------
@@ -695,6 +707,19 @@ class FirestoreService {
         }
       }
 
+      // A dome on the target, or on a bordering territory of its owner,
+      // swallows the missile.
+      var shielded = GameRules.missileShield(_buildingTypeOf(target));
+      for (final id in _neighborIdsOf(target)) {
+        final n = await tx.get(_provincesRef(gameId).doc(id));
+        final nd = n.data();
+        if (n.exists &&
+            nd?['ownerId'] == victimId &&
+            GameRules.missileShield(_buildingTypeOf(nd))) {
+          shielded = true;
+        }
+      }
+
       final now = ServerClock.now();
       final siloBuilding = silo?['building'];
       final lastUsed = siloBuilding is Map ? siloBuilding['lastUsedAt'] : null;
@@ -709,6 +734,46 @@ class FirestoreService {
       if (gold < GameRules.missileCost) return 'Not enough gold.';
 
       final hitBuilding = _buildingTypeOf(target);
+      if (shielded) {
+        // The missile is spent and intercepted: gold and reload time are
+        // paid, the target is untouched.
+        tx.update(siloRef, {'building.lastUsedAt': Timestamp.fromDate(now)});
+        tx.update(
+          attackerRef,
+          _settledIncomeUpdate(
+            attackerSnap,
+            owned: _ownedCount(attackerSnap),
+            buildingIncome: _buildingIncome(attackerSnap),
+            now: now,
+            spend: GameRules.missileCost.toDouble(),
+          ),
+        );
+        final blocked = {
+          'type': 'missile',
+          'attackerId': uid,
+          'defenderId': victimId,
+          'targetId': targetId,
+          'provinceId': siloId,
+          'targetBuilding': hitBuilding,
+          'powerRemoved': 0,
+          'intercepted': true,
+          'at': FieldValue.serverTimestamp(),
+        };
+        tx.set(attackerRef.collection('updates').doc(), blocked);
+        tx.set(victimRef.collection('updates').doc(), blocked);
+        // Every map shows an "intercepted by dome" pop-up on the target
+        // (no error, so no snackbar).
+        tx.set(_gameRef(gameId).collection('missiles').doc(), {
+          'attackerId': uid,
+          'defenderId': victimId,
+          'fromId': siloId,
+          'targetId': targetId,
+          'building': hitBuilding,
+          'intercepted': true,
+          'at': FieldValue.serverTimestamp(),
+        });
+        return null;
+      }
       final troops = (target?['troops'] as num?)?.toDouble() ?? 0;
       final reduced = troops - GameRules.missilePowerDamage;
       final left = troops <= 1 ? troops : (reduced < 1 ? 1.0 : reduced);
@@ -962,7 +1027,10 @@ class FirestoreService {
           GameRules.defenseMultiplier(_buildingTypeOf(targetData));
       final defenderRaw = (targetData?['troops'] as num?)?.toDouble() ?? 0;
       final defenderPower = defenderRaw * defenseMultiplier;
-      final won = attackerPower > defenderPower;
+      // Mines: the defender's trap wipes out the whole attack, whatever the
+      // numbers say.
+      final trapped = GameRules.isTrap(_buildingTypeOf(targetData));
+      final won = !trapped && attackerPower > defenderPower;
 
       final attackedAt = Timestamp.fromDate(now);
       final stamp = FieldValue.serverTimestamp();
@@ -1030,6 +1098,33 @@ class FirestoreService {
           powerAfter: leftover,
           defenderPowerLeft: 0,
           buildingDestroyed: hadBuilding,
+        );
+      } else if (trapped) {
+        // The whole fleet is lost (the base keeps 0 navy); mines used up.
+        tx.update(baseRef, {'navy': 0});
+        attackerRows.add({'id': baseId, 'before': navy, 'after': 0});
+        tx.update(targetRef, {
+          'building': {'type': 'none', 'level': 0},
+        });
+        defenderRows.add({
+          'id': targetId,
+          'before': defenderRaw,
+          'after': defenderRaw,
+          'target': true,
+        });
+        tx.update(attackerRef, {'lastAttackAt': attackedAt});
+        if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
+          tx.update(defenderRef, {'victories': FieldValue.increment(1)});
+        }
+        result = AttackResult(
+          won: false,
+          attackerPower: attackerPower,
+          defenderPower: defenderPower,
+          fighterIds: [baseId],
+          powerAfter: 0,
+          defenderPowerLeft: defenderRaw,
+          buildingDestroyed: true,
+          trapped: true,
         );
       } else {
         final lost = attackerPower * GameRules.failedAttackLossShare;
@@ -1283,7 +1378,10 @@ class FirestoreService {
       final defenderPower = defenderRaw * defenseMultiplier + supportPower;
 
       // Pure subtraction, no luck. A tie goes to the defender.
-      final won = attackerPower > defenderPower;
+      // Mines: the defender's trap wipes out the whole attack, whatever the
+      // numbers say.
+      final trapped = GameRules.isTrap(_buildingTypeOf(targetData));
+      final won = !trapped && attackerPower > defenderPower;
 
       final attackedAt = Timestamp.fromDate(now);
       final stamp = FieldValue.serverTimestamp();
@@ -1388,6 +1486,40 @@ class FirestoreService {
           powerAfter: leftover,
           defenderPowerLeft: 0,
           buildingDestroyed: hadBuilding,
+        );
+      } else if (trapped) {
+        // Every troop that took part dies (a province keeps 1 power, it is
+        // never left at 0). The mines are used up; the defence is untouched.
+        for (final snap in fighters) {
+          tx.update(snap.reference, {'troops': 1, 'troopsUpdatedAt': stamp});
+          attackerRows.add({
+            'id': snap.id,
+            'before': _troopsOf(snap),
+            'after': 1,
+          });
+        }
+        tx.update(targetRef, {
+          'building': {'type': 'none', 'level': 0},
+        });
+        defenderRows.insert(0, {
+          'id': targetId,
+          'before': defenderRaw,
+          'after': defenderRaw,
+          'target': true,
+        });
+        tx.update(attackerRef, {'lastAttackAt': attackedAt});
+        if (defenderRef != null && defenderSnap != null && defenderSnap.exists) {
+          tx.update(defenderRef, {'victories': FieldValue.increment(1)});
+        }
+        result = AttackResult(
+          won: false,
+          attackerPower: attackerPower,
+          defenderPower: defenderPower,
+          fighterIds: [for (final s in fighters) s.id],
+          powerAfter: 0,
+          defenderPowerLeft: defenderRaw,
+          buildingDestroyed: true,
+          trapped: true,
         );
       } else {
         // Every fighter loses a share of its troops (75%); the defence loses

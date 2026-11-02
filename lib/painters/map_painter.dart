@@ -486,6 +486,9 @@ class MapBadge {
   /// 1 = fully visible; lower values fade the whole badge out.
   final double opacity;
 
+  /// Draw a skull instead of the power number (mines blew up the attack).
+  final bool skull;
+
   const MapBadge({
     required this.anchor,
     this.icon,
@@ -494,6 +497,7 @@ class MapBadge {
     this.extent = double.infinity,
     this.color,
     this.opacity = 1,
+    this.skull = false,
   });
 
   @override
@@ -505,10 +509,11 @@ class MapBadge {
       other.navy == navy &&
       other.extent == extent &&
       other.color == color &&
-      other.opacity == opacity;
+      other.opacity == opacity &&
+      other.skull == skull;
 
   @override
-  int get hashCode => Object.hash(anchor, icon, power, navy, extent, color, opacity);
+  int get hashCode => Object.hash(anchor, icon, power, navy, extent, color, opacity, skull);
 }
 
 /// The badge layer: a building icon in the centre of each province that
@@ -602,8 +607,15 @@ class BadgePainter extends CustomPainter {
     });
   }
 
-  TextPainter _powerPainter(int power, int? navy, double size, Color color) {
-    final key = '$power|$navy|${size.toStringAsFixed(2)}|${color.hashCode}';
+  TextPainter _powerPainter(
+    int power,
+    int? navy,
+    double size,
+    Color color, {
+    bool skull = false,
+  }) {
+    final key =
+        '$power|$navy|$skull|${size.toStringAsFixed(2)}|${color.hashCode}';
     return _powerCache.putIfAbsent(key, () {
       final style = ConqueraText.label.copyWith(
         fontSize: size,
@@ -612,7 +624,7 @@ class BadgePainter extends CustomPainter {
       );
       return TextPainter(
         text: TextSpan(
-          text: '$power',
+          text: skull ? '\u{1F480}' : '$power',
           style: style,
           children: [
             if (navy != null) ...[
@@ -675,7 +687,7 @@ class BadgePainter extends CustomPainter {
       final powerMapSize =
           min(powerSize, max(badge.extent * _powerShare, _tinyPowerPx / scale));
       final showNumber =
-          showPower && (badge.power > 0 || badge.navy != null);
+          showPower && (badge.power > 0 || badge.navy != null || badge.skull);
 
       canvas.save();
       canvas.translate(badge.anchor.dx, badge.anchor.dy);
@@ -697,7 +709,13 @@ class BadgePainter extends CustomPainter {
 
       if (showNumber) {
         final numberColor = color.withAlpha((_inkAlpha * powerOpacity).round());
-        final painter = _powerPainter(badge.power, badge.navy, powerMapSize, numberColor);
+        final painter = _powerPainter(
+          badge.power,
+          badge.navy,
+          powerMapSize,
+          numberColor,
+          skull: badge.skull,
+        );
         // Under the icon, or centred when there's no icon to sit under.
         final top = iconFits ? iconMapSize / 2 : -painter.height / 2;
         painter.paint(canvas, Offset(-painter.width / 2, top));

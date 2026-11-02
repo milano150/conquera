@@ -20,6 +20,9 @@ class MissileEvent {
   /// device, right after firing).
   final DateTime? at;
 
+  /// True when a dome swallowed the missile (nothing was hit).
+  final bool intercepted;
+
   const MissileEvent({
     required this.id,
     required this.attackerId,
@@ -28,6 +31,7 @@ class MissileEvent {
     required this.targetId,
     required this.building,
     required this.at,
+    this.intercepted = false,
   });
 
   factory MissileEvent.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -40,6 +44,7 @@ class MissileEvent {
       targetId: d['targetId'] as String? ?? '',
       building: d['building'] as String? ?? 'none',
       at: (d['at'] as Timestamp?)?.toDate(),
+      intercepted: d['intercepted'] as bool? ?? false,
     );
   }
 }
