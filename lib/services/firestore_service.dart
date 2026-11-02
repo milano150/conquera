@@ -845,14 +845,17 @@ class FirestoreService {
       }
 
       final navy = (data?['navy'] as num?)?.toDouble() ?? 0;
-      if (navy + unit.power > GameRules.maxNavy) {
+      if (navy >= GameRules.maxNavy) {
         return 'A naval base holds at most ${GameRules.maxNavy.floor()} navy.';
       }
       final now = ServerClock.now();
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
       if (gold < unit.cost) return 'Not enough gold.';
 
-      tx.update(provinceRef, {'navy': navy + unit.power});
+      // Navy can be fractional (battle leftovers), so the last point tops
+      // the base up to exactly the limit instead of being refused.
+      final newNavy = (navy + unit.power).clamp(0, GameRules.maxNavy).toDouble();
+      tx.update(provinceRef, {'navy': newNavy});
       tx.update(playerRef, {
         'gold': gold - unit.cost,
         'goldUpdatedAt': FieldValue.serverTimestamp(),

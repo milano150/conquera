@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,13 @@ import 'stat_block.dart';
 /// It reads the same live province/player data the map screen already
 /// listens to (passed in as listenables), so numbers update the moment a
 /// purchase goes through, and gold keeps ticking while the window is open.
+/// Reinforcing prices: gold per point of power.
+const int _landGoldPerPower = 2;
+const int _navyGoldPerPower = 5;
+
+/// Most land power that can be bought in one go.
+const int _maxLandPerPurchase = 1000;
+
 class ProvinceDetailDialog extends StatefulWidget {
   final String gameId;
   final String uid;
@@ -61,11 +69,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   /// Once the province actually has a building, that one is shown instead.
   BuildingDef? _pendingBuilding;
 
-  /// Unit picked in the reinforce dropdown (null = none picked).
-  UnitDef? _unit;
+  /// Land power chosen on the reinforce slider.
+  int _power = 1;
 
-  /// Ship picked in the navy dropdown of a naval base (null = none).
-  UnitDef? _navyUnit;
+  /// Navy power chosen on the navy slider of a naval base.
+  int _navyPower = 1;
 
   bool _busy = false;
   String? _message;
@@ -206,9 +214,14 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     }, '$label destroyed.');
   }
 
-  Future<void> _recruitNavy() {
-    final unit = _navyUnit;
-    if (unit == null) return Future.value();
+  Future<void> _recruitNavy(int power) {
+    if (power < 1) return Future.value();
+    final unit = UnitDef(
+      id: 'navy',
+      name: 'Navy',
+      power: power,
+      cost: power * _navyGoldPerPower,
+    );
     return _run(() async {
       await widget.firestore.recruitNavy(
         gameId: widget.gameId,
@@ -216,13 +229,18 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         uid: widget.uid,
         unit: unit,
       );
-      if (mounted) setState(() => _navyUnit = null);
-    }, '${unit.name} added: +${unit.power} navy.');
+      if (mounted) setState(() => _navyPower = 1);
+    }, '+$power navy added.');
   }
 
-  Future<void> _recruit() {
-    final unit = _unit;
-    if (unit == null) return Future.value();
+  Future<void> _recruit(int power) {
+    if (power < 1) return Future.value();
+    final unit = UnitDef(
+      id: 'reinforce',
+      name: 'Reinforcement',
+      power: power,
+      cost: power * _landGoldPerPower,
+    );
     return _run(() async {
       await widget.firestore.recruitTroops(
         gameId: widget.gameId,
@@ -230,9 +248,8 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         uid: widget.uid,
         unit: unit,
       );
-      // Back to "Select unit" (and the price line below disappears).
-      if (mounted) setState(() => _unit = null);
-    }, '${unit.name} added: +${unit.power} power.');
+      if (mounted) setState(() => _power = 1);
+    }, '+$power power added.');
   }
 
   @override
@@ -477,9 +494,14 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     required double gold,
     double? navy,
   }) {
-    final unit = _unit;
-    final unaffordable = unit != null && gold < unit.cost;
-    final canRecruit = unit != null && !unaffordable && !_busy;
+    // Land: 1 .. gold / 2, capped at 1000 power per purchase.
+    final maxLand = math.min(gold ~/ _landGoldPerPower, _maxLandPerPurchase);
+    final power = maxLand < 1 ? 0 : _power.clamp(1, maxLand).toInt();
+
+    // Navy: 1 .. gold / 5, capped by the room left in the naval base.
+    final navyRoom = navy == null ? 0 : (GameRules.maxNavy - navy).ceil();
+    final maxNavy = math.min(gold ~/ _navyGoldPerPower, navyRoom);
+    final navyPower = maxNavy < 1 ? 0 : _navyPower.clamp(1, maxNavy).toInt();
 
     return [
       Row(
@@ -492,22 +514,20 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         ],
       ),
       const SizedBox(height: ConqueraSpace.sm),
-      _Dropdown<UnitDef>(
-        value: unit,
-        hint: 'Select unit',
-        items: GameRules.units,
-        name: (u) => u.name,
-        price: (u) => u.cost,
-        isEnabled: (u) => gold >= u.cost,
-        onChanged: _busy ? null : (u) => setState(() => _unit = u),
+      _AmountSlider(
+        value: power,
+        max: maxLand,
+        goldPerPower: _landGoldPerPower,
+        unit: 'power',
+        color: ConqueraColors.accent,
+        onChanged: _busy ? null : (v) => setState(() => _power = v),
       ),
       const SizedBox(height: ConqueraSpace.sm),
       _ActionRow(
-        price: unit?.cost,
-        info: unit == null ? '' : '+${unit.power} power',
-        unaffordable: unaffordable,
+        info: '',
+        unaffordable: maxLand < 1,
         button: FilledButton(
-          onPressed: canRecruit ? _recruit : null,
+          onPressed: power >= 1 && !_busy ? () => _recruit(power) : null,
           child: const Text('Reinforce'),
         ),
       ),
@@ -531,46 +551,245 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
           ],
         ),
         const SizedBox(height: ConqueraSpace.sm),
-        _Dropdown<UnitDef>(
-          value: _navyUnit,
-          hint: 'Select ship',
-          items: GameRules.navyUnits,
-          name: (u) => u.name,
-          price: (u) => u.cost,
-          isEnabled: (u) =>
-              gold >= u.cost && navy + u.power <= GameRules.maxNavy,
-          onChanged: _busy ? null : (u) => setState(() => _navyUnit = u),
+        _AmountSlider(
+          value: navyPower,
+          max: maxNavy,
+          goldPerPower: _navyGoldPerPower,
+          unit: 'navy',
+          color: GameRules.navyColor,
+          onChanged: _busy ? null : (v) => setState(() => _navyPower = v),
         ),
         const SizedBox(height: ConqueraSpace.sm),
         _ActionRow(
-          price: _navyUnit?.cost,
-          info: _navyUnit == null
-              ? ''
-              : (navy + _navyUnit!.power > GameRules.maxNavy
-                  ? 'Over the ${GameRules.maxNavy.floor()} navy limit'
-                  : '+${_navyUnit!.power} navy'),
-          unaffordable: _navyUnit != null && gold < _navyUnit!.cost,
-          button: Builder(builder: (_) {
-            final canAddNavy = _navyUnit != null &&
-                gold >= _navyUnit!.cost &&
-                navy + _navyUnit!.power <= GameRules.maxNavy &&
-                !_busy;
-            return OutlinedButton(
-              onPressed: canAddNavy ? _recruitNavy : null,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: GameRules.navyColor,
-                side: BorderSide(
-                  color: canAddNavy
-                      ? GameRules.navyColor
-                      : ConqueraColors.divider,
-                ),
+          info: navyRoom < 1 ? 'Navy is full' : '',
+          unaffordable: navyRoom >= 1 && maxNavy < 1,
+          button: OutlinedButton(
+            onPressed:
+                navyPower >= 1 && !_busy ? () => _recruitNavy(navyPower) : null,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: GameRules.navyColor,
+              side: BorderSide(
+                color: navyPower >= 1 && !_busy
+                    ? GameRules.navyColor
+                    : ConqueraColors.divider,
               ),
-              child: const Text('Add navy'),
-            );
-          }),
+            ),
+            child: const Text('Add navy'),
+          ),
         ),
       ],
     ];
+  }
+}
+
+/// Amount picker for reinforcing: a big "+N" readout with its gold price,
+/// then  [-]  slider  [+]  [MAX]  underneath. Picks 1..[max]; everything is
+/// greyed out when [max] is below 1 (nothing affordable / no room).
+class _AmountSlider extends StatelessWidget {
+  final int value;
+  final int max;
+  final int goldPerPower;
+  final String unit;
+  final Color color;
+  final ValueChanged<int>? onChanged;
+
+  const _AmountSlider({
+    required this.value,
+    required this.max,
+    required this.goldPerPower,
+    required this.unit,
+    required this.color,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = max >= 1 && onChanged != null;
+    final accent = enabled ? color : ConqueraColors.muted.withAlpha(120);
+    final readout = ConqueraText.figure.copyWith(
+      fontSize: 26,
+      color: accent,
+    );
+
+    void set(int v) => onChanged?.call(v.clamp(1, max).toInt());
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(enabled ? 130 : 60),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: enabled ? color.withAlpha(150) : ConqueraColors.divider,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(max < 1 ? '+0' : '+$value', style: readout),
+              const SizedBox(width: 6),
+              Text(unit, style: ConqueraText.label),
+              const Spacer(),
+              GoldAmount(
+                max < 1 ? 0 : value * goldPerPower,
+                style: ConqueraText.figure.copyWith(
+                  color: enabled
+                      ? ConqueraColors.ink
+                      : ConqueraColors.muted.withAlpha(140),
+                ),
+                faded: !enabled,
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              _StepButton(
+                icon: Icons.remove,
+                color: color,
+                onTap: enabled && value > 1 ? () => set(value - 1) : null,
+              ),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 8,
+                    activeTrackColor: accent,
+                    inactiveTrackColor: ConqueraColors.divider.withAlpha(110),
+                    disabledActiveTrackColor: accent,
+                    disabledInactiveTrackColor:
+                        ConqueraColors.divider.withAlpha(70),
+                    overlayColor: color.withAlpha(36),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 20),
+                    tickMarkShape: SliderTickMarkShape.noTickMark,
+                    thumbShape: _GameThumb(color: accent),
+                    trackShape: const RoundedRectSliderTrackShape(),
+                  ),
+                  child: Slider(
+                    value: max < 1 ? 0 : value.clamp(1, max).toDouble(),
+                    min: max < 1 ? 0 : 1,
+                    max: max < 2 ? 1 : max.toDouble(),
+                    divisions: max > 1 ? max - 1 : null,
+                    onChanged: enabled && max > 1 ? (v) => set(v.round()) : null,
+                  ),
+                ),
+              ),
+              _StepButton(
+                icon: Icons.add,
+                color: color,
+                onTap: enabled && value < max ? () => set(value + 1) : null,
+              ),
+              const SizedBox(width: 6),
+              _StepButton(
+                label: 'MAX',
+                color: color,
+                onTap: enabled && value < max ? () => set(max) : null,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small round (icon) or pill (label) button beside the slider.
+class _StepButton extends StatelessWidget {
+  final IconData? icon;
+  final String? label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _StepButton({
+    this.icon,
+    this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final on = onTap != null;
+    final c = on ? color : ConqueraColors.muted.withAlpha(110);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 28,
+        constraints: const BoxConstraints(minWidth: 28),
+        padding: EdgeInsets.symmetric(horizontal: label != null ? 8 : 0),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: on ? color.withAlpha(24) : Colors.transparent,
+          borderRadius: BorderRadius.circular(label != null ? 14 : 14),
+          border: Border.all(color: c.withAlpha(on ? 170 : 90)),
+        ),
+        child: icon != null
+            ? Icon(icon, size: 16, color: c)
+            : Text(
+                label!,
+                style: ConqueraText.label.copyWith(
+                  color: c,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+/// Round thumb: soft shadow, light fill, thick colored ring and a small
+/// colored core, so it reads like a game dial rather than a stock slider.
+class _GameThumb extends SliderComponentShape {
+  final Color color;
+
+  const _GameThumb({required this.color});
+
+  static const double _r = 11;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size.fromRadius(_r);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final canvas = context.canvas;
+    final grow = 1 + 0.12 * activationAnimation.value;
+    final r = _r * grow;
+
+    canvas.drawCircle(
+      center.translate(0, 1.5),
+      r,
+      Paint()
+        ..color = Colors.black.withAlpha(50)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+    canvas.drawCircle(center, r, Paint()..color = Colors.white);
+    canvas.drawCircle(
+      center,
+      r - 1.5,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+    canvas.drawCircle(center, 3, Paint()..color = color);
   }
 }
 
@@ -765,107 +984,6 @@ class _ActionRow extends StatelessWidget {
         const SizedBox(width: ConqueraSpace.sm),
         button,
       ],
-    );
-  }
-}
-
-/// Dropdown styled to match the rest of the UI. Nothing is selected until
-/// the player picks something ([value] null shows [hint]). Entries for
-/// which [isEnabled] returns false are greyed out and can't be picked.
-/// The whole dropdown is disabled when [onChanged] is null.
-class _Dropdown<T> extends StatelessWidget {
-  final T? value;
-  final String hint;
-  final List<T> items;
-  final String Function(T) name;
-
-  /// Gold price shown after the name with the coin icon.
-  final int Function(T) price;
-  final bool Function(T)? isEnabled;
-  final ValueChanged<T?>? onChanged;
-
-  const _Dropdown({
-    required this.value,
-    required this.hint,
-    required this.items,
-    required this.name,
-    required this.price,
-    required this.onChanged,
-    this.isEnabled,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(onChanged == null ? 70 : 170),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: ConqueraColors.divider),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          value: value,
-          isExpanded: true,
-          onChanged: onChanged,
-          hint: Text(
-            hint,
-            style: ConqueraText.value.copyWith(color: ConqueraColors.muted),
-          ),
-          icon: Icon(Icons.expand_more, color: ConqueraColors.muted),
-          style: ConqueraText.value,
-          dropdownColor: ConqueraColors.surface,
-          borderRadius: BorderRadius.circular(6),
-          // The closed field always shows the pick in normal ink, even if
-          // gold has since dropped and the entry is greyed in the list.
-          selectedItemBuilder: (context) => [
-            for (final item in items)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _entry(item, ConqueraText.value, faded: false),
-              ),
-          ],
-          items: [
-            for (final item in items)
-              _menuItem(item, enabled: isEnabled?.call(item) ?? true),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// "Name  ·  [coin] price" on one line.
-  Widget _entry(T item, TextStyle style, {required bool faded}) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(
-          child: Text(
-            '${name(item)}  ·  ',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: style,
-          ),
-        ),
-        GoldAmount(price(item), style: style, faded: faded),
-      ],
-    );
-  }
-
-  DropdownMenuItem<T> _menuItem(T item, {required bool enabled}) {
-    return DropdownMenuItem<T>(
-      value: item,
-      enabled: enabled,
-      child: _entry(
-        item,
-        enabled
-            ? ConqueraText.value
-            : ConqueraText.value.copyWith(
-                color: ConqueraColors.muted.withAlpha(110),
-              ),
-        faded: !enabled,
-      ),
     );
   }
 }
