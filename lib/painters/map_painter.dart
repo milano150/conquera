@@ -724,7 +724,7 @@ class BadgePainter extends CustomPainter {
 ///  * null (a radar): the whole map is dimmed except a sharp-edged circle for
 ///    each entry of [circles] (centre, radius). Nothing is drawn at
 ///    [progress] 0; the circles open up while the map dims.
-///  * set (a missile silo): no dimming and no tint. Just a glowing ring in
+///  * set (a missile silo / naval base): no dimming. A soft ring in
 ///    [edgeColor] that grows outward from each centre to its full radius.
 ///
 /// Circles are drawn for every copy of the world, so they wrap around the
@@ -755,7 +755,8 @@ class RadarPainter extends CustomPainter {
 
     final edge = edgeColor;
     if (edge != null) {
-      // Missile range: a ring growing from the centre outward.
+      // Missile / navy range: only its own ring, growing from the centre.
+      final fade = min(1.0, progress * 1.6);
       for (final (c, full) in circles) {
         if (full <= 0) continue;
         final radius = full * progress;
@@ -765,10 +766,18 @@ class RadarPainter extends CustomPainter {
             center,
             radius,
             Paint()
+              ..style = PaintingStyle.fill
+              ..isAntiAlias = true
+              ..color = edge.withAlpha((34 * fade).round()),
+          );
+          canvas.drawCircle(
+            center,
+            radius,
+            Paint()
               ..style = PaintingStyle.stroke
               ..isAntiAlias = true
               ..strokeWidth = full * 0.012
-              ..color = edge.withAlpha((255 * progress).round()),
+              ..color = edge.withAlpha((255 * fade).round()),
           );
         }
       }
@@ -806,80 +815,59 @@ class RadarPainter extends CustomPainter {
       old.wrapWidth != wrapWidth;
 }
 
-/// A small missile in the player's [color], flying in a straight line from
-/// [from] to [to] (map units). [progress] runs 0..1.
-class MissilePainter extends CustomPainter {
-  final Offset from;
-  final Offset to;
-  final Color color;
+/// A bombed territory: [path] flashes red and shakes, then settles.
+/// [progress] runs 0..1.
+class BombPainter extends CustomPainter {
+  final Path path;
   final double progress;
   final double wrapWidth;
 
-  /// Length of the missile in map units (same as a building icon).
-  final double iconSize;
-
-  MissilePainter({
-    required this.from,
-    required this.to,
-    required this.color,
+  BombPainter({
+    required this.path,
     required this.progress,
-    required this.iconSize,
     this.wrapWidth = 0,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (progress <= 0 || progress >= 1) return;
-
-    // Take the short way round the world.
-    var end = to;
-    if (wrapWidth > 0) {
-      final d = to.dx - from.dx;
-      if (d > wrapWidth / 2) end = to.translate(-wrapWidth, 0);
-      if (d < -wrapWidth / 2) end = to.translate(wrapWidth, 0);
-    }
-    final pos = Offset.lerp(
-      from,
-      end,
-      Curves.easeIn.transform(progress.clamp(0.0, 1.0).toDouble()),
-    )!;
-    final angle = (end - from).direction;
-    final unit = iconSize / 4;
-
-    final shape = Path()
-      ..moveTo(unit * 2, 0)
-      ..lineTo(unit * 0.6, -unit * 0.6)
-      ..lineTo(-unit * 1.6, -unit * 0.6)
-      ..lineTo(-unit * 2, -unit * 1.2)
-      ..lineTo(-unit * 2, unit * 1.2)
-      ..lineTo(-unit * 1.6, unit * 0.6)
-      ..lineTo(unit * 0.6, unit * 0.6)
-      ..close();
+    final decay = 1 - progress;
+    final bounds = path.getBounds();
+    final amp = (bounds.shortestSide * 0.05).clamp(1.0, 8.0).toDouble();
+    final shakeX = sin(progress * pi * 14) * amp * decay;
+    final shakeY = cos(progress * pi * 11) * amp * 0.6 * decay;
+    final pulse = 0.55 + 0.45 * cos(progress * pi * 6);
+    final alpha =
+        (190 * pow(decay, 0.7) * pulse).clamp(0, 255).round();
 
     final copies = wrapWidth > 0 ? [0.0, wrapWidth] : [0.0];
     for (final dx in copies) {
       canvas.save();
-      canvas.translate(pos.dx + dx, pos.dy);
-      canvas.rotate(angle);
-      canvas.drawPath(shape, Paint()..color = color);
+      canvas.translate(dx + shakeX, shakeY);
       canvas.drawPath(
-        shape,
+        path,
+        Paint()
+          ..style = PaintingStyle.fill
+          ..isAntiAlias = true
+          ..color = ConqueraColors.danger.withAlpha(alpha),
+      );
+      canvas.drawPath(
+        path,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = unit * 0.25
+          ..isAntiAlias = true
           ..strokeJoin = StrokeJoin.round
-          ..color = ConqueraColors.ink,
+          ..strokeWidth = max(0.5, amp * 0.3)
+          ..color = ConqueraColors.danger
+              .withAlpha((alpha * 1.3).clamp(0, 255).round()),
       );
       canvas.restore();
     }
   }
 
   @override
-  bool shouldRepaint(covariant MissilePainter old) =>
+  bool shouldRepaint(covariant BombPainter old) =>
       old.progress != progress ||
-      old.from != from ||
-      old.to != to ||
-      old.color != color ||
-      old.iconSize != iconSize ||
+      !identical(old.path, path) ||
       old.wrapWidth != wrapWidth;
 }

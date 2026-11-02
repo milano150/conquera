@@ -17,5 +17,5 @@ create new buildings with appropriate icons
 
 - Mines: defense building which is one time use. when attacked, kills all troops involved and loses. not visible on radars
 - Army Camp: building that removes 5 minutes off the attack cooldown per building built.
-- Dome: building that intercepts all missiles that are found within its range. when intercepted send info to log "{countr} intercepted missile from {country}"
+- Dome: protects the territory and all neighbouring territories from missile attacks
 

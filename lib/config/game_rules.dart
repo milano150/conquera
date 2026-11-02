@@ -454,7 +454,7 @@ class GameRules {
     icon: Icons.directions_boat,
     cost: 140,
     site: BuildSite.coastal,
-    navalRadius: 0.10,
+    navalRadius: 0.05,
     useIcon: Icons.sailing,
     effect: 'Navy attacks in range',
     details: 'Holds a navy (up to 200 power, bought in Reinforce) that can '

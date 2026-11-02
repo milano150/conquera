@@ -261,7 +261,8 @@ class _MapScreenState extends State<MapScreen>
   /// Dims the map outside the selected radar's range, 0..1.
   late final AnimationController _radarCtl = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 380),
+    duration: const Duration(milliseconds: 650),
+    reverseDuration: const Duration(milliseconds: 350),
   );
   List<(Offset, double)> _radarCircles = const [];
   bool _radarOn = false;
@@ -272,7 +273,8 @@ class _MapScreenState extends State<MapScreen>
   /// [_radarCtl], at the same time.
   late final AnimationController _radarOutCtl = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 380),
+    duration: const Duration(milliseconds: 650),
+    reverseDuration: const Duration(milliseconds: 350),
   );
   List<(Offset, double)> _outCircles = const [];
   Color? _outEdge;
@@ -283,11 +285,11 @@ class _MapScreenState extends State<MapScreen>
   /// The naval base (province id) the player is aiming its navy from.
   String? _navalBaseId;
 
-  /// The missile currently in flight on the map, if any.
-  ({Offset from, Offset to, Color color})? _missile;
-  late final AnimationController _missileCtl = AnimationController(
+  /// The territory currently shaking from a missile hit, if any.
+  Path? _bomb;
+  late final AnimationController _bombCtl = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 10),
+    duration: const Duration(milliseconds: 900),
   );
 
   /// The pop-up text, 0..1.
@@ -372,7 +374,7 @@ class _MapScreenState extends State<MapScreen>
     _missilesSub?.cancel();
     _logSub?.cancel();
     _unreadLog.dispose();
-    _missileCtl.dispose();
+    _bombCtl.dispose();
     _provinceStates.dispose();
     _players.dispose();
     _dataReady.dispose();
@@ -613,38 +615,9 @@ class _MapScreenState extends State<MapScreen>
     return false;
   }
 
-  /// Centre and radius (map units) of each of the player's missile silos.
-  List<(Offset, double)> _mySilos() {
-    final width = _controller.mapSize.width;
-    final out = <(Offset, double)>[];
-    _provinceStates.value.forEach((id, s) {
-      if (s.ownerId != _uid) return;
-      final fraction = GameRules.missileRadiusOf(s.buildingType);
-      if (fraction <= 0) return;
-      final province = _controller.provinceById(id);
-      if (province != null) out.add((province.anchor, fraction * width));
-    });
-    return out;
-  }
-
-  /// Centre and radius (map units) of each of the player's naval bases.
-  List<(Offset, double)> _myNavalBases() {
-    final width = _controller.mapSize.width;
-    final out = <(Offset, double)>[];
-    _provinceStates.value.forEach((id, s) {
-      if (s.ownerId != _uid) return;
-      final fraction = GameRules.navalRadiusOf(s.buildingType);
-      if (fraction <= 0) return;
-      final province = _controller.provinceById(id);
-      if (province != null) out.add((province.anchor, fraction * width));
-    });
-    return out;
-  }
-
   /// Keeps the range overlay in step with the selection: a selected radar
-  /// shows every radar's range, a selected missile silo shows every silo's
-  /// range with a red edge, and while aiming a missile only that silo's
-  /// range stays up. Fades out otherwise.
+  /// shows every radar's range; a selected missile silo or naval base shows
+  /// only its own range ring (red / blue). Fades out otherwise.
   void _syncRadar(Province? selected, ProvinceState? state) {
     final mine = selected != null && state != null && state.ownerId == _uid;
     List<(Offset, double)>? circles;
@@ -668,12 +641,24 @@ class _MapScreenState extends State<MapScreen>
       circles = [(navalProvince.anchor, fraction * _controller.mapSize.width)];
       edge = GameRules.navyColor;
     } else if (mine && GameRules.navalRadiusOf(state!.buildingType) > 0) {
-      circles = _myNavalBases();
+      circles = [
+        (
+          selected!.anchor,
+          GameRules.navalRadiusOf(state.buildingType) *
+              _controller.mapSize.width
+        )
+      ];
       edge = GameRules.navyColor;
     } else if (mine && GameRules.revealRadiusOf(state!.buildingType) > 0) {
       circles = _myRadars();
     } else if (mine && GameRules.missileRadiusOf(state!.buildingType) > 0) {
-      circles = _mySilos();
+      circles = [
+        (
+          selected!.anchor,
+          GameRules.missileRadiusOf(state.buildingType) *
+              _controller.mapSize.width
+        )
+      ];
       edge = ConqueraColors.danger;
     }
 
@@ -682,11 +667,17 @@ class _MapScreenState extends State<MapScreen>
     // A different kind of overlay is already showing: crossfade. The old one
     // shrinks while the new one grows. Done after the frame so no controller
     // is touched during build.
-    if (on && _radarOn && edge != _radarEdge) {
+    final changed = edge != _radarEdge ||
+        (edge != null && !listEquals(circles, _radarCircles));
+    if (on && _radarOn && changed) {
       final nextCircles = circles;
       final nextEdge = edge;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_radarOn || nextEdge == _radarEdge) return;
+        if (!mounted || !_radarOn) return;
+        if (nextEdge == _radarEdge &&
+            listEquals(nextCircles, _radarCircles)) {
+          return;
+        }
         _outCircles = _radarCircles;
         _outEdge = _radarEdge;
         _radarOutCtl.value = _radarCtl.value;
@@ -1718,32 +1709,30 @@ class _MapScreenState extends State<MapScreen>
     if (!_seenMissileIds.add(e.id)) return;
     final at = e.at;
     if (at != null && ServerClock.now().difference(at).inSeconds > 20) return;
-    final from = _controller.provinceById(e.fromId);
     final to = _controller.provinceById(e.targetId);
-    if (from == null || to == null) return;
-    _playMissile(e, from.anchor, to.anchor);
+    if (to == null) return;
+    _playBomb(e, to);
   }
 
-  /// The missile flies in a straight line in its owner's color; when it
-  /// lands, a pop-up names the building it destroyed.
-  Future<void> _playMissile(MissileEvent e, Offset from, Offset to) async {
-    final color = _players.value[e.attackerId]?.color ?? ConqueraColors.danger;
-    setState(() => _missile = (from: from, to: to, color: color));
-    await _missileCtl.forward(from: 0);
-    if (!mounted) return;
-    setState(() => _missile = null);
+  /// The hit territory shakes and flashes red right away; a pop-up names
+  /// the building it destroyed.
+  Future<void> _playBomb(MissileEvent e, Province to) async {
+    setState(() => _bomb = to.path);
+    _bombCtl.forward(from: 0).whenComplete(() {
+      if (mounted) setState(() => _bomb = null);
+    });
 
     if (_battleRunning) return;
     final name = GameRules.buildingById(e.building)?.name;
     final popup = name != null
         ? _Popup(
-            anchor: to,
+            anchor: to.anchor,
             lead: 'Destroyed ',
             name: name,
             nameColor: ConqueraColors.danger,
           )
         : _Popup(
-            anchor: to,
+            anchor: to.anchor,
             lead: 'No building destroyed',
             name: '',
             nameColor: ConqueraColors.danger,
@@ -2232,7 +2221,7 @@ class _MapScreenState extends State<MapScreen>
                                             painter: RadarPainter(
                                               circles: _outCircles,
                                               edgeColor: _outEdge,
-                                              progress: Curves.easeInOut
+                                              progress: Curves.easeOutCubic
                                                   .transform(
                                                       _radarOutCtl.value),
                                               wrapWidth: mapSize.width,
@@ -2241,7 +2230,7 @@ class _MapScreenState extends State<MapScreen>
                                             foregroundPainter: RadarPainter(
                                               circles: _radarCircles,
                                               edgeColor: _radarEdge,
-                                              progress: Curves.easeInOut
+                                              progress: Curves.easeOutCubic
                                                   .transform(_radarCtl.value),
                                               wrapWidth: mapSize.width,
                                             ),
@@ -2272,20 +2261,16 @@ class _MapScreenState extends State<MapScreen>
                                           ),
                                         ),
                                       ),
-                                    if (_missile != null)
+                                    if (_bomb != null)
                                       IgnorePointer(
                                         child: RepaintBoundary(
                                           child: AnimatedBuilder(
-                                            animation: _missileCtl,
+                                            animation: _bombCtl,
                                             builder: (context, _) => CustomPaint(
                                               size: sceneSize,
-                                              painter: MissilePainter(
-                                                from: _missile!.from,
-                                                to: _missile!.to,
-                                                color: _missile!.color,
-                                                progress: _missileCtl.value,
-                                                iconSize:
-                                                    _iconPxAtMinZoom / minScale,
+                                              painter: BombPainter(
+                                                path: _bomb!,
+                                                progress: _bombCtl.value,
                                                 wrapWidth: mapSize.width,
                                               ),
                                             ),
