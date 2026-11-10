@@ -33,6 +33,7 @@ import '../widgets/attack_dialog.dart';
 import '../widgets/country_info_panel.dart';
 import '../widgets/gold_amount.dart';
 import '../widgets/map_viewport.dart';
+import '../widgets/notifications_dialog.dart';
 import '../widgets/player_top_bar.dart';
 import '../widgets/province_detail_dialog.dart';
 import '../widgets/world_sidebar.dart';
@@ -126,6 +127,8 @@ class _MapScreenState extends State<MapScreen>
   // window can listen to the same data without opening its own streams.
   final FirestoreService _firestore = FirestoreService();
   late final String _uid = DevSession.uid;
+  late final NotificationsController _notifs =
+      NotificationsController(gameId: widget.gameId, uid: _uid);
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
@@ -144,10 +147,16 @@ class _MapScreenState extends State<MapScreen>
   Future<void> _loadLogSeen() async {
     final prefs = await SharedPreferences.getInstance();
     final ms = prefs.getInt(_logSeenKey);
-    // First ever launch: nothing is unread yet.
-    _logSeenAt = ms != null
-        ? DateTime.fromMillisecondsSinceEpoch(ms)
-        : ServerClock.now();
+    if (ms != null) {
+      _logSeenAt = DateTime.fromMillisecondsSinceEpoch(ms);
+    } else {
+      // First ever launch: nothing is unread yet. Save that moment too, or
+      // every launch would start from "now" again and anything that
+      // happened while the game was closed would count as already seen.
+      final now = ServerClock.now();
+      _logSeenAt = now;
+      await prefs.setInt(_logSeenKey, now.millisecondsSinceEpoch);
+    }
     _recountLog();
   }
 
@@ -212,6 +221,41 @@ class _MapScreenState extends State<MapScreen>
   /// Colors forced on provinces while a battle plays, so the base layer
   /// doesn't flip to the new owner before the sweep reaches it.
   Map<String, Color> _colorOverrides = const {};
+
+  /// Old owner's color, held for a province whose owner just changed in the
+  /// live data, until its battle replay starts (or a timeout). Without it the
+  /// map flashes the new owner's color before the sweep begins, because the
+  /// province update arrives a moment before the battle event.
+  final Map<String, Color> _graceColors = {};
+  final Map<String, Timer> _graceTimers = {};
+
+  void _holdFlippedOwners(
+    Map<String, ProvinceState> before,
+    Map<String, ProvinceState> after,
+  ) {
+    if (before.isEmpty) return;
+    final players = _players.value;
+    after.forEach((id, next) {
+      final prevOwner = before[id]?.ownerId;
+      final newOwner = next.ownerId;
+      if (prevOwner == null || newOwner == null) return;
+      if (prevOwner == newOwner || newOwner == _uid) return;
+      final old = players[prevOwner];
+      if (old == null) return;
+      _graceColors[id] = old.color.withAlpha(_ownerFillAlpha);
+      _graceTimers[id]?.cancel();
+      _graceTimers[id] = Timer(const Duration(seconds: 8), () {
+        _releaseGrace(id);
+      });
+    });
+  }
+
+  void _releaseGrace(String id) {
+    _graceTimers.remove(id)?.cancel();
+    if (_graceColors.remove(id) != null && mounted) {
+      _provinceStates.value = Map.of(_provinceStates.value); // repaint
+    }
+  }
 
   /// Provinces the base layer skips (the battle layer draws them).
   Set<String> _hiddenIds = const {};
@@ -329,12 +373,14 @@ class _MapScreenState extends State<MapScreen>
   void initState() {
     super.initState();
     _loadLogSeen();
+    _notifs.start();
     _controller.loadMap(widget.assetPath);
 
     _provincesSub = _firestore
         .watchProvinces(gameId: widget.gameId)
         .listen(
       (states) {
+        _holdFlippedOwners(_provinceStates.value, states);
         _provinceStates.value = states;
         _provincesLoaded = true;
         _dataReady.value = _playersLoaded;
@@ -376,7 +422,11 @@ class _MapScreenState extends State<MapScreen>
     _eventsSub?.cancel();
     _missilesSub?.cancel();
     _logSub?.cancel();
+    for (final t in _graceTimers.values) {
+      t.cancel();
+    }
     _unreadLog.dispose();
+    _notifs.dispose();
     _bombCtl.dispose();
     _provinceStates.dispose();
     _players.dispose();
@@ -571,6 +621,7 @@ class _MapScreenState extends State<MapScreen>
       final owner = players[state.ownerId];
       if (owner != null) colors[id] = owner.color.withAlpha(_ownerFillAlpha);
     });
+    colors.addAll(_graceColors);
     colors.addAll(_colorOverrides);
     return colors;
   }
@@ -793,9 +844,13 @@ class _MapScreenState extends State<MapScreen>
 
   /// Buys the unclaimed [target] (it must border one of the player's
   /// provinces). Asks first, then plays the annexation on the map.
+  /// Territories the local player owns (the claim price grows with it).
+  int get _ownedTerritories =>
+      _provinceStates.value.values.where((s) => s.ownerId == _uid).length;
+
   Future<void> _claim(Province target, {String? navalBaseId}) async {
     if (_battleRunning) return;
-    final cost = GameRules.claimCost;
+    final cost = GameRules.claimCostFor(_ownedTerritories);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1373,6 +1428,8 @@ class _MapScreenState extends State<MapScreen>
       // The live data already shows the result; keep the old owner's color
       // until the sweep has played.
       _colorOverrides = {target.id: defenderColor.withAlpha(_ownerFillAlpha)};
+      _graceColors.remove(target.id);
+      _graceTimers.remove(target.id)?.cancel();
       _hiddenIds = const {};
       _battle = _battleView(
         target: target,
@@ -1632,6 +1689,27 @@ class _MapScreenState extends State<MapScreen>
     return paths;
   }
 
+  /// The selected dome's protection: its own territory plus every bordering
+  /// territory its owner holds (the same rule missiles are checked with).
+  /// Null when the selection isn't one of the player's domes.
+  ({Path dome, List<Path> covered})? _shieldArea() {
+    final selected = _controller.selectedProvince;
+    if (selected == null) return null;
+    final state = _provinceStates.value[selected.id];
+    if (state == null ||
+        state.ownerId != _uid ||
+        !GameRules.missileShield(state.buildingType)) {
+      return null;
+    }
+    final covered = <Path>[];
+    for (final id in _controller.neighborsOf(selected.id)) {
+      if (_provinceStates.value[id]?.ownerId != _uid) continue;
+      final p = _controller.provinceById(id);
+      if (p != null) covered.add(p.path);
+    }
+    return (dome: selected.path, covered: covered);
+  }
+
   /// Outlines of the coastal enemy territories the aiming base can attack.
   List<Path> _navalTargetPaths() {
     final baseId = _navalBaseId;
@@ -1843,7 +1921,8 @@ class _MapScreenState extends State<MapScreen>
     _recountLog();
   }
 
-  /// Bottom-left shortcut to the Log, with a red count of unseen entries.
+  /// Bottom-left shortcut to the News, with a red count of unseen entries
+  /// (including everything that happened while the game was closed).
   Widget _logButton() {
     return Positioned(
       left: ConqueraSpace.md,
@@ -1870,7 +1949,7 @@ class _MapScreenState extends State<MapScreen>
                   width: 54,
                   height: 54,
                   child: Icon(
-                    Icons.article_outlined,
+                    Icons.newspaper,
                     size: 26,
                     color: ConqueraColors.ink,
                   ),
@@ -1909,6 +1988,17 @@ class _MapScreenState extends State<MapScreen>
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _openNotifications() {
+    showDialog<void>(
+      context: context,
+      builder: (_) => NotificationsDialog(
+        controller: _notifs,
+        provinces: _controller.provinces,
+        players: _players,
       ),
     );
   }
@@ -2322,6 +2412,32 @@ class _MapScreenState extends State<MapScreen>
                                           ),
                                         ),
                                       ),
+                                    Builder(
+                                      builder: (context) {
+                                        final shield = _shieldArea();
+                                        if (shield == null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return IgnorePointer(
+                                          child: RepaintBoundary(
+                                            child: AnimatedBuilder(
+                                              animation: _transform,
+                                              builder: (context, _) =>
+                                                  CustomPaint(
+                                                size: sceneSize,
+                                                painter: ShieldPainter(
+                                                  domePath: shield.dome,
+                                                  paths: shield.covered,
+                                                  scale: _transform.value
+                                                      .getMaxScaleOnAxis(),
+                                                  wrapWidth: mapSize.width,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
                                     if (_bomb != null)
                                       IgnorePointer(
                                         child: RepaintBoundary(
@@ -2373,6 +2489,14 @@ class _MapScreenState extends State<MapScreen>
                       ),
                     _attackAlert(),
                     _logButton(),
+                    NotificationsButton(
+                      controller: _notifs,
+                      bottom: ConqueraSpace.md +
+                          54 +
+                          6 +
+                          MediaQuery.of(context).padding.bottom,
+                      onTap: _openNotifications,
+                    ),
                     Positioned(
                       top: 0,
                       left: 0,
@@ -2405,6 +2529,8 @@ class _MapScreenState extends State<MapScreen>
                                 attackReadyAt: attackReadyAt,
                                 onAttack: () => _openAttack(selected),
                                 onClaim: () => _claim(selected),
+                                claimPrice:
+                                    GameRules.claimCostFor(_ownedTerritories),
                                 useIcon: selectedState?.ownerId == _uid
                                     ? GameRules.buildingById(
                                         selectedState!.buildingType,

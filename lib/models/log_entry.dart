@@ -22,6 +22,11 @@ class LogEntry {
   final String? victimName;
   final String? victimColor;
 
+  /// The defending player of an attack event (null for older events).
+  final String? defenderId;
+  final String? defenderName;
+  final String? defenderColor;
+
   /// The territory annexed or attacked.
   final String targetId;
   final bool won;
@@ -36,6 +41,9 @@ class LogEntry {
     this.victimId,
     this.victimName,
     this.victimColor,
+    this.defenderId,
+    this.defenderName,
+    this.defenderColor,
     this.targetId = '',
     this.won = false,
   });
@@ -59,6 +67,9 @@ class LogEntry {
       victimId: d['victimId'] as String?,
       victimName: d['victimName'] as String?,
       victimColor: d['victimColor'] as String?,
+      defenderId: d['defenderId'] as String?,
+      defenderName: d['defenderName'] as String?,
+      defenderColor: d['defenderColor'] as String?,
       targetId: d['targetId'] as String? ?? '',
       won: d['won'] as bool? ?? false,
     );

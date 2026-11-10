@@ -192,35 +192,73 @@ class UnitDef {
 /// Every tunable number of the game in one place.
 ///
 /// Unit prices get cheaper per point of power as units get bigger:
-///   squad     10 gold for  +5  (2.0 per power)
-///   legion    18 gold for +10  (1.8 per power)
-///   battalion 32 gold for +20  (1.6 per power)
-/// so a battalion (32) costs less than 4 squads (40) for the same +20.
+///   squad     20 gold for  +5  (4.0 per power)
+///   legion    36 gold for +10  (3.6 per power)
+///   battalion 64 gold for +20  (3.2 per power)
+/// so a battalion (64) costs less than 4 squads (80) for the same +20.
 class GameRules {
   const GameRules._();
 
   // ECONOMY (gold per second in code; the top bar shows /min or /hr)
   //
-  //   tax      0.0005 /s =  1.8 /hr per territory
-  //   mine     0.0010 /s =  3.6 /hr   cost 16  -> pays back in ~4.4 h
-  //   harbor   0.0015 /s =  5.4 /hr   cost 24  -> ~4.4 h
-  //   rig      0.0025 /s =  9.0 /hr   cost 40  -> ~4.4 h
-  //   diamond  0.0040 /s = 14.4 /hr   cost 64  -> ~4.4 h
-  //   uranium  0.0035 /s = 12.6 /hr   cost 56  -> ~4.4 h
-  //   silver   0.0020 /s =  7.2 /hr   cost 32  -> ~4.4 h
-  //   market   0.0003 /s =  1.08 /hr per bordering territory you own,
-  //            cost 20 -> ~4.6 h with 4 partners (slower with fewer)
+  // Slow-burn balance: every income building pays itself back in roughly
+  // 45-70 hours (before per-territory multipliers), so growth takes days.
   //
-  // Every income building pays itself back in about the same time, so
-  // building early always snowballs; the better buildings just earn more
-  // per slot (and need the right territory). A new territory costs the
-  // claim price plus a squad or two to make its neighbors able to claim,
-  // and pays back through tax and its building slot over many hours.
-  // Units are untouched: a squad is 10 gold, so one mine is 1.6 squads.
+  //   tax      0.00010 /s =  0.36 /hr per territory
+  //   mine     0.00040 /s =  1.44 /hr   cost  70 -> ~49 h
+  //   harbor   0.00060 /s =  2.16 /hr   cost 100 -> ~46 h
+  //   rig/oil  0.00110 /s =  3.96 /hr   cost 180 -> ~45 h
+  //   refinery 0.00090 /s =  3.24 /hr per supplier, cost 320 -> ~49 h (2)
+  //   resort   0.00170 /s =  6.12 /hr   cost 420 -> ~69 h
+  //   diamond  0.00160 /s =  5.76 /hr   cost 260 -> ~45 h
+  //   uranium  0.00145 /s =  5.22 /hr   cost 230 -> ~44 h
+  //   silver   0.00080 /s =  2.88 /hr   cost 130 -> ~45 h
+  //   market   0.00008 /s =  0.29 /hr per bordering territory you own,
+  //            cost 60 -> ~52 h with 4 partners
+  //
+  // Defence, scouting and missile buildings, units, navy, claims and
+  // missiles all cost about double or more, so gold has to be chosen.
 
   /// Gold price of claiming a bordering unclaimed province. Claiming does
   /// not start (or wait for) the attack cooldown.
-  static const int claimCost = 25;
+  static const int claimCost = 40;
+
+  /// Claim price grows with the territories you already own:
+  /// claimCost + claimCostPerTerritory per extra territory, up to claimCostMax.
+  static const int claimCostPerTerritory = 5;
+  static const int claimCostMax = 200;
+
+  /// What claiming costs a player who owns [owned] territories.
+  static int claimCostFor(int owned) {
+    final extra = (owned < 1 ? 0 : owned - 1) * claimCostPerTerritory;
+    final c = claimCost + extra;
+    return c > claimCostMax ? claimCostMax : c;
+  }
+
+  /// Each income building of a kind you already own makes the next one of
+  /// the SAME kind pricier: +20% per one owned, up to x4. Silver mines only
+  /// raise the price of silver mines. Defence, scouting and missile
+  /// buildings keep a flat price.
+  static const double buildCostStep = 0.20;
+  static const double buildCostMaxMultiplier = 4.0;
+
+  /// True if [buildingType] earns gold (so its price escalates).
+  static bool isIncomeBuilding(String buildingType) {
+    final b = buildingById(buildingType);
+    return b != null && (b.goldPerSec > 0 || b.goldPerPartnerPerSec > 0);
+  }
+
+  /// Price of the next [building] for a player who already owns [owned] of
+  /// that same building.
+  static int buildCostFor(BuildingDef building, int owned) {
+    if (!(building.goldPerSec > 0 || building.goldPerPartnerPerSec > 0)) {
+      return building.cost;
+    }
+    final n = owned < 0 ? 0 : owned;
+    var mult = 1 + buildCostStep * n;
+    if (mult > buildCostMaxMultiplier) mult = buildCostMaxMultiplier;
+    return (building.cost * mult).round();
+  }
 
   /// Gold a player starts with when joining a world: enough for a squad, a
   /// first claim, and a mine or two.
@@ -251,14 +289,14 @@ class GameRules {
       canAct(troops) && !(buildingById(buildingType)?.blocksAttacks ?? false);
 
   /// Taxes: every territory a player owns earns this much gold per second.
-  static const double goldPerTerritoryPerSec = 0.0005;
+  static const double goldPerTerritoryPerSec = 0.0001;
 
   static const BuildingDef goldMine = BuildingDef(
     id: 'gold_mine',
     name: 'Gold mine',
     icon: Icons.factory,
-    cost: 16,
-    goldPerSec: 0.001,
+    cost: 70,
+    goldPerSec: 0.0004,
     details: 'Produces gold for you around the clock. Can be built in any '
         'territory; gold-rich territories pay more.',
   );
@@ -268,8 +306,8 @@ class GameRules {
     id: 'fishing_harbor',
     name: 'Fishing harbor',
     icon: Icons.anchor,
-    cost: 24,
-    goldPerSec: 0.0015,
+    cost: 100,
+    goldPerSec: 0.0006,
     site: BuildSite.coastal,
     details: 'Fishing income for territories with a coast. Landlocked '
         'territories cannot build it. Territories with bigger fish catches '
@@ -281,8 +319,8 @@ class GameRules {
     id: 'offshore_rig',
     name: 'Offshore rig',
     icon: Icons.oil_barrel,
-    cost: 40,
-    goldPerSec: 0.0025,
+    cost: 180,
+    goldPerSec: 0.0011,
     site: BuildSite.archipelago,
     details: 'The best gold income, but only island territories can build '
         'it. Islands with more oil pay more.',
@@ -293,8 +331,8 @@ class GameRules {
     id: 'oil_field',
     name: 'Oil field',
     icon: Icons.local_gas_station,
-    cost: 40,
-    goldPerSec: 0.0025,
+    cost: 180,
+    goldPerSec: 0.0011,
     site: BuildSite.producer,
     details: 'Same income as an offshore rig, built on the mainland. Only '
         'oil-producing territories can build it, and richer oil pays more.',
@@ -306,8 +344,8 @@ class GameRules {
     id: 'oil_refinery',
     name: 'Oil refinery',
     icon: Icons.propane_tank,
-    cost: 100,
-    goldPerSec: 0.0030, // per bordering rig or oil field
+    cost: 320,
+    goldPerSec: 0.0009, // per bordering rig or oil field
     suppliedBy: {'offshore_rig', 'oil_field'},
     details: 'Refines the oil of bordering offshore rigs and oil fields that '
         'you own, earning gold for each one. If every bordering rig is '
@@ -319,8 +357,8 @@ class GameRules {
     id: 'island_resort',
     name: 'Island resort',
     icon: Icons.beach_access,
-    cost: 150,
-    goldPerSec: 0.0060,
+    cost: 420,
+    goldPerSec: 0.0017,
     site: BuildSite.archipelago,
     details: 'A costly tourist resort with a high income. Only island '
         'territories can build it.',
@@ -331,8 +369,8 @@ class GameRules {
     id: 'diamond_mine',
     name: 'Diamond mine',
     icon: Icons.diamond,
-    cost: 64,
-    goldPerSec: 0.004,
+    cost: 260,
+    goldPerSec: 0.0016,
     site: BuildSite.producer,
     details: 'The richest single income. Only territories that really mine '
         'diamonds can build it, and bigger diamond output pays more.',
@@ -343,8 +381,8 @@ class GameRules {
     id: 'uranium_mine',
     name: 'Uranium mine',
     icon: Icons.bolt,
-    cost: 56,
-    goldPerSec: 0.0035,
+    cost: 230,
+    goldPerSec: 0.00145,
     site: BuildSite.producer,
     details: 'High income from nuclear fuel. Only territories that really '
         'mine uranium can build it, and bigger output pays more.',
@@ -355,8 +393,8 @@ class GameRules {
     id: 'silver_mine',
     name: 'Silver mine',
     icon: Icons.toll,
-    cost: 32,
-    goldPerSec: 0.002,
+    cost: 130,
+    goldPerSec: 0.0008,
     site: BuildSite.producer,
     details: 'Steady income from silver. Only territories that really mine '
         'silver can build it, and bigger output pays more.',
@@ -367,8 +405,8 @@ class GameRules {
     id: 'market',
     name: 'Market',
     icon: Icons.storefront,
-    cost: 20,
-    goldPerPartnerPerSec: 0.0003,
+    cost: 60,
+    goldPerPartnerPerSec: 0.00008,
     details: 'Earns gold for every bordering territory you own (sea links '
         'count). Needs at least one neighbor.',
   );
@@ -377,7 +415,7 @@ class GameRules {
     id: 'fortress',
     name: 'Fortress',
     icon: Icons.fort,
-    cost: 35,
+    cost: 110,
     defenseBonus: 0.5,
     effect: '+50% defense',
     details: 'Makes this territory 50% harder to invade.',
@@ -388,7 +426,7 @@ class GameRules {
     id: 'wall',
     name: 'Wall',
     icon: Icons.security,
-    cost: 90,
+    cost: 280,
     defenseBonus: 2.0,
     blocksAttacks: true,
     effect: '3x defense, no attacking',
@@ -402,7 +440,7 @@ class GameRules {
     id: 'mines',
     name: 'Mines',
     icon: Icons.dangerous,
-    cost: 45,
+    cost: 130,
     isTrap: true,
     hiddenFromScouting: true,
     effect: 'One-use trap, hidden',
@@ -415,8 +453,8 @@ class GameRules {
   static const BuildingDef dome = BuildingDef(
     id: 'dome',
     name: 'Dome',
-    icon: Icons.umbrella,
-    cost: 130,
+    icon: Icons.wb_twighlight,
+    cost: 420,
     missileShield: true,
     effect: 'Blocks missiles nearby',
     details: 'Protects this territory and every bordering territory you own '
@@ -428,7 +466,7 @@ class GameRules {
     id: 'watchtower',
     name: 'Watchtower',
     icon: Icons.cell_tower,
-    cost: 55,
+    cost: 130,
     revealsNeighbors: true,
     effect: 'Reveals neighbors',
     details: 'Shows the buildings and power of every bordering territory '
@@ -440,7 +478,7 @@ class GameRules {
     id: 'radar',
     name: 'Radar',
     icon: Icons.settings_input_antenna,
-    cost: 90,
+    cost: 240,
     revealRadius: 0.06,
     effect: 'Reveals nearby area',
     details: 'Shows the buildings and power of every territory inside its '
@@ -452,7 +490,7 @@ class GameRules {
     id: 'high_altitude_radar',
     name: 'High altitude radar',
     icon: Icons.wifi_tethering,
-    cost: 180,
+    cost: 480,
     site: BuildSite.mountainous,
     revealRadius: 0.12,
     effect: 'Reveals a wide area',
@@ -465,7 +503,7 @@ class GameRules {
     id: 'barracks',
     name: 'Barracks',
     icon: Icons.military_tech,
-    cost: 30,
+    cost: 90,
     supportsAttacks: true,
     effect: 'Backs neighbor attacks',
     details: 'Adds this territory\'s power to attacks launched by bordering '
@@ -477,12 +515,12 @@ class GameRules {
     id: 'missile_silo',
     name: 'Missile silo',
     icon: Icons.rocket_launch,
-    cost: 160,
+    cost: 520,
     missileRadius: 0.09,
     useIcon: Icons.gps_fixed,
     effect: 'Fires missiles in range',
-    details: 'Fires a missile at an enemy territory inside its range for 100 '
-        'gold (1 hour cooldown per silo). A hit destroys the building there '
+    details: 'Fires a missile at an enemy territory inside its range for 250 '
+        'gold (3 hour cooldown per silo). A hit destroys the building there '
         'and removes 20 power. Select the silo on the map to see the range.',
   );
 
@@ -493,7 +531,7 @@ class GameRules {
     id: 'naval_base',
     name: 'Naval base',
     icon: Icons.directions_boat,
-    cost: 140,
+    cost: 450,
     site: BuildSite.coastal,
     navalRadius: 0.05,
     useIcon: Icons.sailing,
@@ -514,16 +552,16 @@ class GameRules {
   /// Ships bought in the Reinforce window of a naval base. Much costlier per
   /// point of power than land units (2.0 / 1.8 / 1.6 gold per power).
   static const List<UnitDef> navyUnits = [
-    UnitDef(id: 'patrol_boat', name: 'Patrol boat', power: 5, cost: 30),
-    UnitDef(id: 'destroyer', name: 'Destroyer', power: 10, cost: 55),
-    UnitDef(id: 'cruiser', name: 'Cruiser', power: 20, cost: 100),
+    UnitDef(id: 'patrol_boat', name: 'Patrol boat', power: 5, cost: 60),
+    UnitDef(id: 'destroyer', name: 'Destroyer', power: 10, cost: 110),
+    UnitDef(id: 'cruiser', name: 'Cruiser', power: 20, cost: 200),
   ];
 
   /// Gold a missile launch costs.
-  static const int missileCost = 100;
+  static const int missileCost = 250;
 
   /// How long a silo must reload between launches.
-  static const Duration missileCooldown = Duration(hours: 1);
+  static const Duration missileCooldown = Duration(hours: 3);
 
   /// Power a missile hit removes from the target territory.
   static const double missilePowerDamage = 20;
@@ -635,9 +673,9 @@ class GameRules {
       buildingById(buildingType)?.supportsAttacks ?? false;
 
   static const List<UnitDef> units = [
-    UnitDef(id: 'squad', name: 'Squad', power: 5, cost: 10),
-    UnitDef(id: 'legion', name: 'Legion', power: 10, cost: 18),
-    UnitDef(id: 'battalion', name: 'Battalion', power: 20, cost: 32),
+    UnitDef(id: 'squad', name: 'Squad', power: 5, cost: 20),
+    UnitDef(id: 'legion', name: 'Legion', power: 10, cost: 36),
+    UnitDef(id: 'battalion', name: 'Battalion', power: 20, cost: 64),
   ];
 
   static BuildingDef? buildingById(String id) {

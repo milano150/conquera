@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../config/dev_session.dart';
 import '../config/player_colors.dart';
+import '../config/recent_worlds.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
 import '../services/firestore_service.dart';
@@ -114,6 +115,7 @@ class _JoinScreenState extends State<JoinScreen> {
         colorHex: _colorHex!,
         spawnCandidates: _spawnCandidates(map.provinces),
       );
+      await RecentWorlds.add(widget.gameId);
       if (!mounted) return;
 
       await Navigator.of(context).pushReplacement(
@@ -139,7 +141,9 @@ class _JoinScreenState extends State<JoinScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: Center(
+        child: Stack(
+          children: [
+            Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(ConqueraSpace.lg),
             child: ConstrainedBox(
@@ -228,6 +232,17 @@ class _JoinScreenState extends State<JoinScreen> {
               ),
             ),
           ),
+        ),
+            Positioned(
+              top: ConqueraSpace.sm,
+              left: ConqueraSpace.sm,
+              child: IconButton(
+                onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back, size: 20),
+                color: ConqueraColors.ink,
+              ),
+            ),
+          ],
         ),
       ),
     );

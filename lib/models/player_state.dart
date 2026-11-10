@@ -29,6 +29,9 @@ class PlayerState {
   /// Players this one has eliminated from the game (leaderboard).
   final int kills;
 
+  /// Territories the player owns.
+  final int ownedCount;
+
   const PlayerState({
     required this.uid,
     required this.displayName,
@@ -40,6 +43,7 @@ class PlayerState {
     this.lastDestroyAt,
     this.victories = 0,
     this.kills = 0,
+    this.ownedCount = 0,
   });
 
   factory PlayerState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -59,6 +63,7 @@ class PlayerState {
       lastDestroyAt: lastDestroy is Timestamp ? lastDestroy.toDate() : null,
       victories: (data['victories'] as num?)?.toInt() ?? 0,
       kills: (data['kills'] as num?)?.toInt() ?? 0,
+      ownedCount: (data['ownedCount'] as num?)?.toInt() ?? 0,
     );
   }
 

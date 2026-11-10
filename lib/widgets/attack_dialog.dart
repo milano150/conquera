@@ -25,7 +25,9 @@ class AttackDialog extends StatefulWidget {
   /// Every province that borders the target (not only the player's).
   final Set<String> neighborIds;
 
-  /// True if a radar already shows the target's power and buildings.
+  /// True if a radar already shows the target's power and buildings. The
+  /// attack window still hides the defender's total until the attack is
+  /// confirmed.
   final bool targetVisible;
 
   /// Barracks the player owns that may join the attack: candidate province
@@ -79,8 +81,9 @@ class _AttackDialogState extends State<AttackDialog> {
   late final bool _trapped;
 
   /// The defender's power and buildings stay hidden (fog of war) until the
-  /// attack is confirmed.
-  late bool _revealed = widget.targetVisible;
+  /// attack is confirmed, even if a radar already shows the territory's own
+  /// troops: hidden barracks can still join the defence.
+  bool _revealed = false;
   bool _confirming = false;
 
   @override
@@ -208,10 +211,6 @@ class _AttackDialogState extends State<AttackDialog> {
 
   /// Closes the window and hands the fighters to the map screen.
   void _confirm() {
-    if (widget.targetVisible) {
-      Navigator.of(context).pop(_fighterIds);
-      return;
-    }
     if (_confirming) return;
     setState(() {
       _confirming = true;

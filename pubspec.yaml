@@ -1,5 +1,5 @@
 name: conquera
-description: Conquera - a world-map war game.
+description: Conquera - a world-map war game
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -15,12 +15,19 @@ dependencies:
   google_fonts: ^8.2.1
   path_drawing: ^1.0.1
   shared_preferences: ^2.5.5
+  url_launcher: ^6.3.2
   xml: ^6.5.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.0
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/icon.png"
 
 flutter:
   uses-material-design: true

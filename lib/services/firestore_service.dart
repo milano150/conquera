@@ -497,6 +497,15 @@ class FirestoreService {
     final provinceRef = _provincesRef(gameId).doc(provinceId);
     final playerRef = _playerRef(gameId, uid);
     final neighbors = neighborIds.toSet()..remove(provinceId);
+    // Each building of the same kind the player already owns makes the next
+    // one pricier. (Transactions can't run queries, so count them first.)
+    final owned = await _provincesRef(gameId)
+        .where('ownerId', isEqualTo: uid)
+        .get();
+    final sameKind = owned.docs
+        .where((d) => _buildingTypeOf(d.data()) == building.id)
+        .length;
+    final price = GameRules.buildCostFor(building, sameKind);
     // Only a market needs to know who the neighbors belong to.
     final supplies = GameRules.suppliesOthers(building.id);
     final neighborRefs = [
@@ -535,7 +544,7 @@ class FirestoreService {
         return 'You can build again in $secs s.';
       }
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
-      if (gold < building.cost) return 'Not enough gold.';
+      if (gold < price) return 'Not enough gold.';
 
       // A market trades with the bordering territories the player owns.
       // (a refinery only counts bordering suppliers of the player).
@@ -578,7 +587,7 @@ class FirestoreService {
           owned: _ownedCount(playerSnap),
           buildingIncome: _buildingIncome(playerSnap) + addedIncome,
           now: now,
-          spend: building.cost.toDouble(),
+          spend: price.toDouble(),
         ),
       );
       tx.set(playerRef.collection('updates').doc(), {
@@ -1165,6 +1174,8 @@ class FirestoreService {
           'actorColor': _colorOf(attackerSnap),
           'attackerId': uid,
           'defenderId': defenderId,
+          'defenderName': _nameOf(defenderSnap),
+          'defenderColor': _colorOf(defenderSnap),
           'targetId': targetId,
           'won': r.won,
           'fighterIds': r.fighterIds,
@@ -1596,6 +1607,8 @@ class FirestoreService {
           'actorColor': _colorOf(attackerSnap),
           'attackerId': uid,
           'defenderId': defenderId,
+          'defenderName': _nameOf(defenderSnap),
+          'defenderColor': _colorOf(defenderSnap),
           'targetId': targetId,
           'won': r.won,
           'fighterIds': r.fighterIds,
@@ -1691,7 +1704,7 @@ class FirestoreService {
       if (!GameRules.canAct(navy)) return 'Your navy is too weak.';
 
       final now = ServerClock.now();
-      final cost = GameRules.claimCost;
+      final cost = GameRules.claimCostFor(_ownedCount(playerSnap));
       if (PlayerState.fromDoc(playerSnap).goldAt(now) < cost) {
         return 'Not enough gold.';
       }
@@ -1817,7 +1830,7 @@ class FirestoreService {
         if (barracks == null) return "Provinces with only 1 power can't claim.";
       }
 
-      final cost = GameRules.claimCost;
+      final cost = GameRules.claimCostFor(_ownedCount(playerSnap));
       if (player.goldAt(now) < cost) return 'Not enough gold.';
 
       final stamp = FieldValue.serverTimestamp();
@@ -1986,6 +1999,15 @@ class FirestoreService {
   }) async {
     final snap = await _playerRef(gameId, uid).get();
     return snap.exists;
+  }
+
+  /// The player's document, or null if [uid] hasn't joined the world.
+  Future<PlayerState?> fetchPlayer({
+    required String gameId,
+    required String uid,
+  }) async {
+    final snap = await _playerRef(gameId, uid).get();
+    return snap.exists ? PlayerState.fromDoc(snap) : null;
   }
 
   /// Re-checks a returning player's territory count and building income

@@ -889,3 +889,65 @@ class BombPainter extends CustomPainter {
       !identical(old.path, path) ||
       old.wrapWidth != wrapWidth;
 }
+
+/// The dome's protection, shown when a dome is selected: the dome's own
+/// territory and every bordering territory its owner holds get a bluish
+/// tint with a soft glowing edge, at a constant on-screen thickness.
+class ShieldPainter extends CustomPainter {
+  /// The dome's own territory (drawn a little stronger).
+  final Path? domePath;
+
+  /// The bordering territories it covers.
+  final List<Path> paths;
+  final double scale;
+  final double wrapWidth;
+
+  static const Color _shield = Color(0xFF4DA3FF);
+
+  ShieldPainter({
+    required this.domePath,
+    required this.paths,
+    required this.scale,
+    this.wrapWidth = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final dome = domePath;
+    if (dome == null || scale <= 0) return;
+
+    Paint fill(int alpha) => Paint()
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true
+      ..color = _shield.withAlpha(alpha);
+    Paint line(int alpha, double px) => Paint()
+      ..style = PaintingStyle.stroke
+      ..isAntiAlias = true
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round
+      ..color = _shield.withAlpha(alpha)
+      ..strokeWidth = px / scale;
+
+    final copies = wrapWidth > 0 ? 2 : 1;
+    for (var i = 0; i < copies; i++) {
+      canvas.save();
+      canvas.translate(i * wrapWidth, 0);
+      for (final p in paths) {
+        canvas.drawPath(p, fill(60));
+        canvas.drawPath(p, line(70, 7)); // soft glow
+        canvas.drawPath(p, line(220, 1.8));
+      }
+      canvas.drawPath(dome, fill(105));
+      canvas.drawPath(dome, line(90, 9));
+      canvas.drawPath(dome, line(255, 2.4));
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant ShieldPainter old) =>
+      !identical(old.domePath, domePath) ||
+      !listEquals(old.paths, paths) ||
+      old.scale != scale ||
+      old.wrapWidth != wrapWidth;
+}

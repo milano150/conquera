@@ -1,21 +1,24 @@
 next additions
 
+read the strucuture of my project using the least tokens possible. give .dart file replacements when i ask
+
 
 pre beta 1.1
 
+- fix back to lobby and add loading screen
 - main screen overhaul
-- add gold cap 
-- fix multiple radii glitch
 - BALANCE EVERYTHING
 - better how to
 - complete ui revamp
-- better trade menu
+- respawn as insurgency
+- pointless text removal
+- minimal sound design
 
 
 
-create new buildings with appropriate icons
 
-- Mines: defense building which is one time use. when attacked, kills all troops involved and loses. not visible on radars
-- Army Camp: building that removes 5 minutes off the attack cooldown per building built.
-- Dome: protects the territory and all neighbouring territories from missile attacks
+
+
+
+
 

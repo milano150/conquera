@@ -143,6 +143,7 @@ class _WorldSidebarState extends State<WorldSidebar>
               child: FractionalTranslation(
                 translation: Offset(t - 1, 0),
                 child: _Panel(
+                  onClose: widget.onClose,
                   worldId: widget.worldId,
                   players: widget.players,
                   provinces: widget.provinces,
@@ -164,6 +165,7 @@ class _WorldSidebarState extends State<WorldSidebar>
 }
 
 class _Panel extends StatefulWidget {
+  final VoidCallback onClose;
   final String worldId;
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
@@ -176,6 +178,7 @@ class _Panel extends StatefulWidget {
   final bool startOnLog;
 
   const _Panel({
+    required this.onClose,
     required this.startOnLog,
     required this.worldId,
     required this.players,
@@ -281,20 +284,20 @@ class _PanelState extends State<_Panel> {
           label: 'History',
           onTap: () => setState(() => _view = _View.history),
         ),
-        _Item(label: 'Log', onTap: () => setState(() => _view = _View.log)),
+        _Item(label: 'News', onTap: () => setState(() => _view = _View.log)),
         _Item(
           label: 'Trade',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => TradeScreen(
-                gameId: widget.worldId,
-                myUid: widget.myUid,
-                players: widget.players,
-                provinces: widget.provinces,
-                provinceNames: widget.provinceNames,
-              ),
-            ),
-          ),
+          onTap: () {
+            TradeScreen.show(
+              context,
+              gameId: widget.worldId,
+              myUid: widget.myUid,
+              players: widget.players,
+              provinces: widget.provinces,
+              provinceNames: widget.provinceNames,
+            );
+            widget.onClose();
+          },
         ),
         _Item(label: 'How to play', onTap: widget.onOpenHowToPlay),
         _Item(

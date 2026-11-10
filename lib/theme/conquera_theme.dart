@@ -152,6 +152,18 @@ ThemeData buildConqueraTheme() {
     ),
     scaffoldBackgroundColor: ConqueraColors.sea,
     dialogBackgroundColor: ConqueraColors.surface,
+    // Every screen slides in from the right (and out to the right) on all
+    // platforms, like the menu screens.
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.fuchsia: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.linux: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.windows: CupertinoPageTransitionsBuilder(),
+      },
+    ),
   );
 
   // One button look for the whole game: hollow, thin outline, regular

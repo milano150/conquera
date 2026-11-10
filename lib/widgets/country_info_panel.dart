@@ -44,6 +44,9 @@ class CountryInfoPanel extends StatelessWidget {
   final VoidCallback? onAttack;
   final VoidCallback? onClaim;
 
+  /// What claiming this territory costs the player right now.
+  final int claimPrice;
+
   /// Icon of the USE button beside Manage (a missile silo's launch).
   /// Null = no button.
   final IconData? useIcon;
@@ -80,6 +83,7 @@ class CountryInfoPanel extends StatelessWidget {
     this.attackReadyAt,
     this.onAttack,
     this.onClaim,
+    this.claimPrice = GameRules.claimCost,
     this.useIcon,
     this.useColor,
     this.onUse,
@@ -176,7 +180,7 @@ class CountryInfoPanel extends StatelessWidget {
                       if (canAttack)
                         _ActionButton(
                           label: 'Claim',
-                          price: GameRules.claimCost,
+                          price: claimPrice,
                           color: ConqueraColors.accent,
                           enabled: canSplit,
                           readyAt: null, // claiming has no cooldown

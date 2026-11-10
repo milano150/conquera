@@ -141,6 +141,18 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     }
   }
 
+  /// How many of each building type the player owns (each one makes the next
+  /// of the same type pricier).
+  Map<String, int> get _ownedByType {
+    final counts = <String, int>{};
+    for (final s in widget.provinceStates.value.values) {
+      if (s.ownerId == widget.uid && s.hasBuilding) {
+        counts[s.buildingType] = (counts[s.buildingType] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
   /// Opens the building picker and previews whatever is chosen.
   Future<void> _pickBuilding(double gold) async {
     final picked = await showDialog<BuildingDef>(
@@ -154,6 +166,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               widget.provinceStates.value[id]!.buildingType,
         },
         gold: gold,
+        ownedByType: _ownedByType,
         selected: _pendingBuilding,
       ),
     );
@@ -452,7 +465,10 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     }
 
     final pending = _pendingBuilding;
-    final unaffordable = pending != null && gold < pending.cost;
+    final pendingPrice = pending == null
+        ? null
+        : GameRules.buildCostFor(pending, _ownedByType[pending.id] ?? 0);
+    final unaffordable = pendingPrice != null && gold < pendingPrice;
     // After destroying a building the player must wait before building.
     final cooldownLeft = _remaining(buildReadyAt);
     final cooling = cooldownLeft > Duration.zero;
@@ -471,7 +487,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                 _PickerField(
                   hint: 'Select building',
                   label: pending?.name,
-                  price: pending?.cost,
+                  price: pendingPrice,
                   onTap: _busy ? null : () => _pickBuilding(gold),
                 ),
                 const SizedBox(height: ConqueraSpace.sm),
@@ -1086,6 +1102,8 @@ class _BuildingPicker extends StatelessWidget {
   /// Building types on the bordering territories the player owns.
   final Set<String> ownNeighborTypes;
   final double gold;
+  /// building id -> how many the player owns.
+  final Map<String, int> ownedByType;
   final BuildingDef? selected;
 
   const _BuildingPicker({
@@ -1093,6 +1111,7 @@ class _BuildingPicker extends StatelessWidget {
     required this.neighbors,
     required this.ownNeighborTypes,
     required this.gold,
+    required this.ownedByType,
     required this.selected,
   });
 
@@ -1167,11 +1186,18 @@ class _BuildingPicker extends StatelessWidget {
             _BuildingTile(
               building: b,
               selected: selected?.id == b.id,
-              affordable: gold >= b.cost,
+              price: GameRules.buildCostFor(b, ownedByType[b.id] ?? 0),
+              owned: ownedByType[b.id] ?? 0,
+              affordable:
+                  gold >= GameRules.buildCostFor(b, ownedByType[b.id] ?? 0),
               onTap: () => Navigator.of(context).pop(b),
               onInfo: () => showDialog<void>(
                 context: context,
-                builder: (_) => _BuildingInfoDialog(building: b, provinceId: provinceId),
+                builder: (_) => _BuildingInfoDialog(
+                  building: b,
+                  provinceId: provinceId,
+                  price: GameRules.buildCostFor(b, ownedByType[b.id] ?? 0),
+                ),
               ),
             ),
         ],
@@ -1182,6 +1208,8 @@ class _BuildingPicker extends StatelessWidget {
 
 class _BuildingTile extends StatelessWidget {
   final BuildingDef building;
+  final int price;
+  final int owned;
   final bool selected;
   final bool affordable;
   final VoidCallback onTap;
@@ -1189,6 +1217,8 @@ class _BuildingTile extends StatelessWidget {
 
   const _BuildingTile({
     required this.building,
+    required this.price,
+    required this.owned,
     required this.selected,
     required this.affordable,
     required this.onTap,
@@ -1214,6 +1244,18 @@ class _BuildingTile extends StatelessWidget {
                 size: 14,
                 color: ConqueraColors.muted,
               ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 9,
+          right: 8,
+          child: Text(
+            'Owned $owned',
+            style: ConqueraText.label.copyWith(
+              fontSize: 11,
+              fontWeight: owned > 0 ? FontWeight.w700 : FontWeight.w400,
+              color: owned > 0 ? ConqueraColors.ink : ConqueraColors.muted,
             ),
           ),
         ),
@@ -1255,7 +1297,7 @@ class _BuildingTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 GoldAmount(
-                  building.cost,
+                  price,
                   style: ConqueraText.label.copyWith(
                     color: affordable
                         ? ConqueraColors.muted
@@ -1276,8 +1318,13 @@ class _BuildingTile extends StatelessWidget {
 class _BuildingInfoDialog extends StatelessWidget {
   final BuildingDef building;
   final String? provinceId;
+  final int? price;
 
-  const _BuildingInfoDialog({required this.building, this.provinceId});
+  const _BuildingInfoDialog({
+    required this.building,
+    this.provinceId,
+    this.price,
+  });
 
   String get _where => switch (building.site) {
         BuildSite.coastal => 'Coastal territories',
@@ -1344,7 +1391,10 @@ class _BuildingInfoDialog extends StatelessWidget {
               Text(building.details, style: ConqueraText.value),
               const SizedBox(height: ConqueraSpace.sm),
               Divider(height: 1, color: ConqueraColors.divider),
-              _row('Cost', GoldAmount(building.cost, style: ConqueraText.value)),
+              _row(
+                'Cost',
+                GoldAmount(price ?? building.cost, style: ConqueraText.value),
+              ),
               _row(
                 'Effect',
                 Text(building.effectLabelFor(0, provinceId), style: ConqueraText.value),

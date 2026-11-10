@@ -120,7 +120,7 @@ class _LogScreenState extends State<LogScreen> {
                     icon: const Icon(Icons.arrow_back, size: 20),
                     color: ConqueraColors.ink,
                   ),
-                  Text('Log', style: ConqueraText.title.copyWith(fontSize: 22)),
+                  Text('News', style: ConqueraText.title.copyWith(fontSize: 22)),
                 ],
               ),
             ),
@@ -192,9 +192,15 @@ class _LogScreenState extends State<LogScreen> {
           e.won ? ConqueraColors.success : ConqueraColors.danger,
           [
             actor,
-            const TextSpan(text: ' attacked '),
+            TextSpan(text: e.won ? ' annexed ' : ' failed to annex '),
             target,
-            TextSpan(text: e.won ? ' and won' : ' and lost'),
+            const TextSpan(text: ' from '),
+            TextSpan(
+              text: _name(e.defenderId, e.defenderName),
+              style: TextStyle(
+                color: _playerColor(e.defenderId, e.defenderColor),
+              ),
+            ),
           ],
         );
       case LogType.join:

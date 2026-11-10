@@ -392,8 +392,13 @@ class LogPanel extends StatelessWidget {
           [
             actor,
             TextSpan(
-              text: ' attacked ${_province(e.targetId)}'
-                  '${e.won ? ' and won' : ' and lost'}',
+              text: e.won ? ' annexed ' : ' failed to annex ',
+            ),
+            TextSpan(text: _province(e.targetId)),
+            const TextSpan(text: ' from '),
+            TextSpan(
+              text: _name(e.defenderId, e.defenderName),
+              style: TextStyle(color: _color(e.defenderId, e.defenderColor)),
             ),
           ],
           e.at,
@@ -425,7 +430,7 @@ class LogPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _FeedHeader(title: 'Log', onBack: onBack, onExpand: onExpand),
+        _FeedHeader(title: 'News', onBack: onBack, onExpand: onExpand),
         Expanded(
           child: _Feed<LogEntry>(
             stream: firestore.watchLog(gameId: gameId, limit: 40),

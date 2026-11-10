@@ -27,8 +27,8 @@ class HowToPlayScreen extends StatelessWidget {
     (
       'Power',
       'Power is the strength of the army in a territory. Tap a territory to '
-          'open it and buy units: a squad gives +5 power for 10 gold, a '
-          'legion +10 for 18, and a battalion +20 for 32. Bigger units cost '
+          'open it and buy units: a squad gives +5 power for 20 gold, a '
+          'legion +10 for 36, and a battalion +20 for 64. Bigger units cost '
           'less per point of power. One power always stays behind as a '
           'garrison, so a territory needs at least '
           '${GameRules.minPowerToAct.toInt()} power to attack or claim.',
@@ -36,7 +36,9 @@ class HowToPlayScreen extends StatelessWidget {
     (
       'Claiming land',
       'A bordering territory that nobody owns can be claimed for '
-          '${GameRules.claimCost} gold. Sea links count as borders, so '
+          '${GameRules.claimCost} gold, plus ${GameRules.claimCostPerTerritory} '
+          'more for every territory you already own (up to '
+          '${GameRules.claimCostMax}). Sea links count as borders, so '
           'islands and far coasts can be reachable too. Claiming has no '
           'cooldown.',
     ),

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,8 +14,10 @@ import '../services/firestore_service.dart'
 import '../services/server_clock.dart';
 import '../services/trade_service.dart';
 import '../theme/conquera_theme.dart';
+import '../widgets/conquera_text_field.dart';
 import '../widgets/gold_amount.dart';
 import '../widgets/player_tag.dart';
+import '../widgets/stat_block.dart';
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -22,11 +26,13 @@ Color _hex(String hex) {
   return Color(0xFF000000 | v);
 }
 
-String _left(Duration d) {
+String _span(Duration d) {
   final h = d.inHours;
   final m = d.inMinutes.remainder(60);
-  return h > 0 ? '${h}h ${m}m left' : '${m < 1 ? 1 : m}m left';
+  return h > 0 ? '${h}h ${m}m' : '${m < 1 ? 1 : m}m';
 }
+
+String _left(Duration d) => '${_span(d)} left';
 
 String _n(int v) {
   final s = v.toString();
@@ -51,93 +57,706 @@ String _summary(List<String> ids, int gold, String Function(String) name) {
   return parts.isEmpty ? 'nothing' : parts.join(' + ');
 }
 
-Color get _cardColor => Color.alphaBlend(
-      ConqueraColors.ink.withOpacity(ConqueraColors.dark ? 0.07 : 0.05),
-      ConqueraColors.surface,
+/// Same fill the build window uses for its fields and cards.
+Color get _fieldFill => ConqueraColors.dark
+    ? ConqueraColors.ink.withAlpha(18)
+    : Colors.white.withAlpha(170);
+
+Color get _faintLine => ConqueraColors.divider.withAlpha(90);
+
+/// The shared hollow button with a different outline color (Destroy,
+/// Accept...). Everything else comes from the app theme.
+ButtonStyle _tinted(Color c, {double height = 36}) => ButtonStyle(
+      minimumSize: MaterialStatePropertyAll(Size(0, height)),
+      foregroundColor: MaterialStateProperty.resolveWith(
+        (s) => s.contains(MaterialState.disabled)
+            ? ConqueraColors.muted.withAlpha(150)
+            : c,
+      ),
+      side: MaterialStateProperty.resolveWith(
+        (s) => BorderSide(
+          color: s.contains(MaterialState.disabled)
+              ? ConqueraColors.divider
+              : c,
+        ),
+      ),
     );
 
-Color get _lineColor => ConqueraColors.divider.withOpacity(0.5);
+/// Most gold you can ask the other player for in one offer.
+const int _getGoldCap = 10000;
 
-/// Rounded card used for every block on this screen.
-class _Panel extends StatelessWidget {
+/// Gold is typed and shown with thousands separators.
+int _parseGold(String s) => int.tryParse(s.replaceAll(',', '')) ?? 0;
+
+/// Step size that grows with the amount, so +/- stays useful from 5 gold to
+/// 5 million.
+int _tier(int v) => v < 100
+    ? 1
+    : v < 1000
+        ? 10
+        : v < 10000
+            ? 100
+            : v < 100000
+                ? 1000
+                : 10000;
+
+int _snap(int v) {
+  final t = _tier(v);
+  return ((v + t ~/ 2) ~/ t) * t;
+}
+
+// ───────────────────────── small building blocks ─────────────────────────
+
+/// The window itself: same shell as the build window.
+class _Shell extends StatelessWidget {
   final Widget child;
-  final EdgeInsets padding;
-  final Color? borderColor;
 
-  const _Panel({
-    required this.child,
-    this.padding = const EdgeInsets.all(14),
-    this.borderColor,
-  });
+  const _Shell({required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor ?? _lineColor),
+    return Dialog(
+      backgroundColor: ConqueraColors.surface,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(ConqueraSpace.md),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: ConqueraColors.divider),
       ),
-      child: child,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: child,
+      ),
     );
   }
 }
 
-/// Small tinted label.
-class _Pill extends StatelessWidget {
-  final String text;
-  final Color color;
+class _Header extends StatelessWidget {
+  final String title;
+  final VoidCallback? onBack;
+  final VoidCallback onClose;
 
-  const _Pill(this.text, this.color);
+  const _Header({required this.title, required this.onClose, this.onBack});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.14),
-        borderRadius: BorderRadius.circular(20),
+    return Row(
+      children: [
+        if (onBack != null)
+          IconButton(
+            onPressed: onBack,
+            tooltip: 'Back',
+            icon: const Icon(Icons.arrow_back, size: 20),
+            color: ConqueraColors.ink,
+            visualDensity: VisualDensity.compact,
+          ),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: ConqueraText.title,
+          ),
+        ),
+        IconButton(
+          onPressed: onClose,
+          tooltip: 'Close',
+          icon: const Icon(Icons.close, size: 20),
+          color: ConqueraColors.muted,
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+
+  const _SectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text.toUpperCase(),
+      style: ConqueraText.label.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: 1.0,
       ),
-      child: Text(
-        text,
-        style: ConqueraText.label.copyWith(
-          color: color,
-          fontWeight: FontWeight.w600,
+    );
+  }
+}
+
+/// Divider with the build window's spacing around it.
+List<Widget> _rule() => [
+      const SizedBox(height: ConqueraSpace.lg),
+      Divider(height: 1, color: ConqueraColors.divider),
+      const SizedBox(height: ConqueraSpace.lg),
+    ];
+
+/// Info text on the left, action button(s) on the right.
+class _ActionRow extends StatelessWidget {
+  final String info;
+  final Color? infoColor;
+  final Widget button;
+
+  const _ActionRow({required this.info, required this.button, this.infoColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            info,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: ConqueraText.label.copyWith(
+              color: infoColor ?? ConqueraColors.muted,
+            ),
+          ),
+        ),
+        const SizedBox(width: ConqueraSpace.sm),
+        button,
+      ],
+    );
+  }
+}
+
+/// Coin + amount with thousands separators.
+class _Gold extends StatelessWidget {
+  final int amount;
+  final TextStyle? style;
+  final double iconSize;
+
+  const _Gold(this.amount, {this.style, this.iconSize = 15});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GoldIcon(size: iconSize),
+        const SizedBox(width: 4),
+        Text(_n(amount), style: style ?? ConqueraText.value),
+      ],
+    );
+  }
+}
+
+/// Your gold, ticking live.
+class _LiveGold extends StatefulWidget {
+  final ValueListenable<Map<String, PlayerState>> players;
+  final String uid;
+
+  const _LiveGold({required this.players, required this.uid});
+
+  @override
+  State<_LiveGold> createState() => _LiveGoldState();
+}
+
+class _LiveGoldState extends State<_LiveGold> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gold =
+        widget.players.value[widget.uid]?.goldAt(ServerClock.now()) ?? 0;
+    return _Gold(
+      gold.floor(),
+      style: ConqueraText.value.copyWith(
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+}
+
+/// Small squarish outlined (icon or label) button beside the slider.
+class _StepButton extends StatelessWidget {
+  final IconData? icon;
+  final String? label;
+  final VoidCallback? onTap;
+
+  const _StepButton({this.icon, this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final on = onTap != null;
+    final c = on ? ConqueraColors.ink : ConqueraColors.muted.withAlpha(150);
+    final border = on ? ConqueraColors.ink : ConqueraColors.divider;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 30,
+        constraints: const BoxConstraints(minWidth: 30),
+        padding: EdgeInsets.symmetric(horizontal: label != null ? 10 : 0),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: border),
+        ),
+        child: icon != null
+            ? Icon(icon, size: 16, color: c)
+            : Text(
+                label!,
+                style: ConqueraText.label.copyWith(
+                  color: c,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.8,
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+/// Round slider thumb, same as the reinforce slider.
+class _GameThumb extends SliderComponentShape {
+  final Color color;
+
+  const _GameThumb({required this.color});
+
+  static const double _r = 11;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size.fromRadius(_r);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final canvas = context.canvas;
+    final grow = 1 + 0.12 * activationAnimation.value;
+    final r = _r * grow;
+
+    canvas.drawCircle(
+      center.translate(0, 1.5),
+      r,
+      Paint()
+        ..color = Colors.black.withAlpha(50)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+    canvas.drawCircle(center, r, Paint()..color = Colors.white);
+    canvas.drawCircle(
+      center,
+      r - 1.5,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+    canvas.drawCircle(center, 3, Paint()..color = color);
+  }
+}
+
+/// Keeps a gold field to digits (max 8) with thousands separators.
+class _CommaFormatter extends TextInputFormatter {
+  const _CommaFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length > 8) digits = digits.substring(0, 8);
+    digits = digits.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+    final text = digits.isEmpty ? '' : _n(int.parse(digits));
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+/// The reinforce-style card for gold: a typed amount, a slider, - / + / MAX.
+/// The slider is not linear (fine control for small sums, still reaches
+/// millions); the field accepts an exact amount.
+class _GoldSlider extends StatefulWidget {
+  final int value;
+  final int max;
+  final String caption;
+  final ValueChanged<int> onChanged;
+
+  const _GoldSlider({
+    required this.value,
+    required this.max,
+    required this.caption,
+    required this.onChanged,
+  });
+
+  @override
+  State<_GoldSlider> createState() => _GoldSliderState();
+}
+
+class _GoldSliderState extends State<_GoldSlider> {
+  late final TextEditingController _c =
+      TextEditingController(text: _fmt(widget.value));
+
+  static String _fmt(int v) => v <= 0 ? '' : _n(v);
+
+  @override
+  void didUpdateWidget(covariant _GoldSlider old) {
+    super.didUpdateWidget(old);
+    // Slider / buttons moved the value: show it. Typing already matches, so
+    // the cursor is left alone.
+    if (_parseGold(_c.text) != widget.value) {
+      final t = _fmt(widget.value);
+      _c.value = TextEditingValue(
+        text: t,
+        selection: TextSelection.collapsed(offset: t.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  int get _max => widget.max;
+
+  void _set(int v) => widget.onChanged(v.clamp(0, _max).toInt());
+
+  double _toSlider(int v) {
+    if (_max < 1) return 0;
+    return math.pow((v / _max).clamp(0.0, 1.0), 1 / 3).toDouble();
+  }
+
+  int _fromSlider(double f) {
+    if (f >= 0.995) return _max;
+    final raw = (_max * f * f * f).round();
+    return math.min(_snap(raw), _max);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = _max >= 1;
+    final accent = enabled ? ConqueraColors.ink : ConqueraColors.muted.withAlpha(120);
+    final value = widget.value.clamp(0, math.max(_max, 0)).toInt();
+
+    final readout = ConqueraText.figure.copyWith(fontSize: 26, color: accent);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+      decoration: BoxDecoration(
+        color: enabled ? _fieldFill : _fieldFill.withAlpha(60),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: enabled
+              ? ConqueraColors.ink.withAlpha(150)
+              : ConqueraColors.divider,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              GoldIcon(size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _c,
+                  enabled: enabled,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  inputFormatters: const [_CommaFormatter()],
+                  cursorColor: ConqueraColors.ink,
+                  style: readout,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    hintText: '0',
+                    hintStyle: readout.copyWith(
+                      color: ConqueraColors.muted.withAlpha(120),
+                    ),
+                  ),
+                  onChanged: (t) => _set(math.min(_parseGold(t), _max)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  widget.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ConqueraText.label,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              _StepButton(
+                icon: Icons.remove,
+                onTap: enabled && value > 0
+                    ? () => _set(value - _tier(math.max(value - 1, 1)))
+                    : null,
+              ),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 8,
+                    activeTrackColor: accent,
+                    inactiveTrackColor: ConqueraColors.divider.withAlpha(110),
+                    disabledActiveTrackColor: accent,
+                    disabledInactiveTrackColor:
+                        ConqueraColors.divider.withAlpha(70),
+                    overlayColor: ConqueraColors.ink.withAlpha(36),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 20),
+                    tickMarkShape: SliderTickMarkShape.noTickMark,
+                    thumbShape: _GameThumb(color: accent),
+                    trackShape: const RoundedRectSliderTrackShape(),
+                  ),
+                  child: Slider(
+                    value: _toSlider(value),
+                    min: 0,
+                    max: 1,
+                    onChanged: enabled ? (f) => _set(_fromSlider(f)) : null,
+                  ),
+                ),
+              ),
+              _StepButton(
+                icon: Icons.add,
+                onTap: enabled && value < _max
+                    ? () => _set(value + _tier(value))
+                    : null,
+              ),
+              const SizedBox(width: 6),
+              _StepButton(
+                label: 'MAX',
+                onTap: enabled && value < _max ? () => _set(_max) : null,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Same look as the build window's "Select building" field.
+class _PickerField extends StatelessWidget {
+  final String hint;
+  final String? label;
+  final VoidCallback? onTap;
+
+  const _PickerField({
+    required this.hint,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final chosen = label != null;
+    return Material(
+      color: onTap == null ? _fieldFill.withAlpha(70) : _fieldFill,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: ConqueraColors.divider),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  chosen ? label! : hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: chosen
+                      ? ConqueraText.value
+                      : ConqueraText.value.copyWith(
+                          color: ConqueraColors.muted,
+                        ),
+                ),
+              ),
+              Icon(Icons.expand_more, color: ConqueraColors.muted),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Round icon badge ("give" arrow / "get" arrow).
-class _Badge extends StatelessWidget {
+/// Square slot (like the building icon slot): direction arrow + how many
+/// territories are in this side of the trade.
+class _DirSlot extends StatelessWidget {
   final IconData icon;
   final Color color;
-  final double size;
+  final int count;
 
-  const _Badge(this.icon, this.color, {this.size = 28});
+  const _DirSlot({
+    required this.icon,
+    required this.color,
+    required this.count,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
+      width: 56,
+      height: 56,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        shape: BoxShape.circle,
+        color: _fieldFill,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: ConqueraColors.divider),
       ),
-      child: Icon(icon, size: size * 0.58, color: color),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 22, color: color),
+          const SizedBox(height: 2),
+          Text(
+            '$count',
+            style: ConqueraText.label.copyWith(
+              fontWeight: FontWeight.w600,
+              color: ConqueraColors.ink,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-// ───────────────────────── screen ─────────────────────────
+/// A picked territory, with an x to remove it.
+class _Chip extends StatelessWidget {
+  final String text;
+  final VoidCallback onRemove;
 
-/// Private trades with other players. "Received" are offers sent to you,
-/// "Sent" are yours. The big + button opens ONE sheet where you pick the
-/// player, fill in what you give / get, and send.
+  const _Chip({required this.text, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 5, 4, 5),
+      decoration: BoxDecoration(
+        color: _fieldFill,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: ConqueraColors.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: ConqueraText.value.copyWith(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 2),
+          GestureDetector(
+            onTap: onRemove,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: Icon(Icons.close, size: 14, color: ConqueraColors.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Received | Sent switch, in the hollow-button look.
+class _TabButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _TabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? ConqueraColors.ink.withAlpha(14) : null,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: selected ? ConqueraColors.ink : ConqueraColors.divider,
+            ),
+          ),
+          child: Text(
+            label,
+            style: ConqueraText.value.copyWith(
+              fontSize: 14,
+              color: selected ? ConqueraColors.ink : ConqueraColors.muted,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ───────────────────────── window ─────────────────────────
+
+enum _View { home, build, offer }
+
+/// Private trades with other players, in one window that matches the build
+/// window. Three views live inside it: the offer lists, the "new trade"
+/// builder, and a single offer in detail.
+///
+/// Open it with [TradeScreen.show].
 class TradeScreen extends StatefulWidget {
   final String gameId;
   final String? myUid;
@@ -156,6 +775,26 @@ class TradeScreen extends StatefulWidget {
     required this.provinceNames,
   });
 
+  static Future<void> show(
+    BuildContext context, {
+    required String gameId,
+    required String? myUid,
+    required ValueListenable<Map<String, PlayerState>> players,
+    required ValueListenable<Map<String, ProvinceState>> provinces,
+    required Map<String, String> provinceNames,
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => TradeScreen(
+        gameId: gameId,
+        myUid: myUid,
+        players: players,
+        provinces: provinces,
+        provinceNames: provinceNames,
+      ),
+    );
+  }
+
   @override
   State<TradeScreen> createState() => _TradeScreenState();
 }
@@ -166,8 +805,13 @@ class _TradeScreenState extends State<TradeScreen> {
   StreamSubscription<List<TradeOffer>>? _sub;
   Timer? _tick;
   List<TradeOffer> _offers = const [];
-  bool _sent = false;
+
+  _View _view = _View.home;
+  String? _offerId;
+  bool _sentTab = false;
   bool _busy = false;
+  String? _message;
+  bool _isError = false;
 
   @override
   void initState() {
@@ -196,129 +840,171 @@ class _TradeScreenState extends State<TradeScreen> {
 
   String _name(String id) => widget.provinceNames[id] ?? id;
 
-  void _toast(String message) {
-    final m = ScaffoldMessenger.of(context);
-    m.hideCurrentSnackBar();
-    m.showSnackBar(SnackBar(content: Text(message)));
+  void _go(_View v, {String? offerId}) {
+    setState(() {
+      _view = v;
+      _offerId = offerId;
+      _message = null;
+    });
   }
 
-  Future<bool> _run(Future<void> Function() job, String done) async {
-    if (_busy) return false;
-    setState(() => _busy = true);
+  void _close() => Navigator.of(context).pop();
+
+  Future<void> _run(Future<void> Function() job, String done) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
     try {
       await job();
-      if (mounted) _toast(done);
-      return true;
+      if (mounted) {
+        setState(() {
+          _message = done;
+          _isError = false;
+        });
+      }
     } on GameActionException catch (e) {
-      if (mounted) _toast(e.message);
+      if (mounted) {
+        setState(() {
+          _message = e.message;
+          _isError = true;
+        });
+      }
     } catch (_) {
-      if (mounted) _toast('Something went wrong. Try again.');
+      if (mounted) {
+        setState(() {
+          _message = 'Something went wrong. Try again.';
+          _isError = true;
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    return false;
   }
 
-  static const _sheetShape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-  );
-
-  Future<void> _newTrade(String uid) async {
-    final sent = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: ConqueraColors.surface,
-      shape: _sheetShape,
-      builder: (_) => _BuilderSheet(
-        gameId: widget.gameId,
-        myUid: uid,
-        service: _service,
-        players: widget.players,
-        provinces: widget.provinces,
-        provinceNames: widget.provinceNames,
-      ),
-    );
-    if (sent == true && mounted) {
-      setState(() => _sent = true);
-      _toast('Offer sent.');
+  TradeOffer? _find(String? id) {
+    if (id == null) return null;
+    for (final o in _offers) {
+      if (o.id == id) return o;
     }
-  }
-
-  void _open(TradeOffer o, String uid) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: ConqueraColors.surface,
-      shape: _sheetShape,
-      builder: (sheet) => _OfferSheet(
-        offer: o,
-        uid: uid,
-        players: widget.players,
-        provinces: widget.provinces,
-        provinceNames: widget.provinceNames,
-        onAccept: () async {
-          Navigator.of(sheet).pop();
-          await _run(
-            () => _service.acceptOffer(
-                gameId: widget.gameId, uid: uid, offerId: o.id),
-            'Trade completed.',
-          );
-        },
-        onRemove: () async {
-          Navigator.of(sheet).pop();
-          await _run(
-            () => _service.removeOffer(
-                gameId: widget.gameId, uid: uid, offerId: o.id),
-            o.fromId == uid ? 'Offer cancelled.' : 'Offer declined.',
-          );
-        },
-        onDestroy: (provinceId) => _game.destroyBuilding(
-          gameId: widget.gameId,
-          provinceId: provinceId,
-          uid: uid,
-        ),
-      ),
-    );
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
     final uid = widget.myUid;
-    return Scaffold(
-      backgroundColor: ConqueraColors.surface,
-      appBar: AppBar(
-        backgroundColor: ConqueraColors.surface,
-        foregroundColor: ConqueraColors.ink,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: Text('Trade', style: ConqueraText.title.copyWith(fontSize: 22)),
-      ),
-      floatingActionButton: uid == null
-          ? null
-          : FloatingActionButton.large(
-              tooltip: 'New trade',
-              elevation: 5,
-              backgroundColor: ConqueraColors.ink,
-              foregroundColor: ConqueraColors.onInk,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(28),
-              ),
-              onPressed: _busy ? null : () => _newTrade(uid),
-              child: const Icon(Icons.add, size: 42),
+    if (uid == null) {
+      return _Shell(
+        child: Padding(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Header(title: 'Trade', onClose: _close),
+              const SizedBox(height: ConqueraSpace.sm),
+              Text('Join the world to trade.', style: ConqueraText.label),
+              const SizedBox(height: ConqueraSpace.sm),
+            ],
+          ),
+        ),
+      );
+    }
+
+    switch (_view) {
+      case _View.build:
+        return _Shell(
+          child: _Builder(
+            gameId: widget.gameId,
+            myUid: uid,
+            service: _service,
+            players: widget.players,
+            provinces: widget.provinces,
+            provinceNames: widget.provinceNames,
+            onBack: () => _go(_View.home),
+            onClose: _close,
+            onSent: () {
+              setState(() {
+                _view = _View.home;
+                _sentTab = true;
+                _message = 'Offer sent.';
+                _isError = false;
+              });
+            },
+          ),
+        );
+      case _View.offer:
+        final offer = _find(_offerId);
+        if (offer == null) {
+          // Accepted, declined or removed meanwhile: back to the list.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _view == _View.offer && _find(_offerId) == null) {
+              setState(() => _view = _View.home);
+            }
+          });
+          return _Shell(child: _homeListener(uid));
+        }
+        return _Shell(
+          child: _OfferView(
+            offer: offer,
+            uid: uid,
+            players: widget.players,
+            provinces: widget.provinces,
+            provinceNames: widget.provinceNames,
+            onBack: () => _go(_View.home),
+            onClose: _close,
+            onAccept: () {
+              setState(() {
+                _view = _View.home;
+                _message = null;
+              });
+              _run(
+                () => _service.acceptOffer(
+                  gameId: widget.gameId,
+                  uid: uid,
+                  offerId: offer.id,
+                ),
+                'Trade completed.',
+              );
+            },
+            onRemove: () {
+              final mine = offer.fromId == uid;
+              setState(() {
+                _view = _View.home;
+                _message = null;
+              });
+              _run(
+                () => _service.removeOffer(
+                  gameId: widget.gameId,
+                  uid: uid,
+                  offerId: offer.id,
+                ),
+                mine ? 'Offer cancelled.' : 'Offer declined.',
+              );
+            },
+            onDestroy: (provinceId) => _game.destroyBuilding(
+              gameId: widget.gameId,
+              provinceId: provinceId,
+              uid: uid,
             ),
-      body: uid == null
-          ? Center(
-              child: Text('Join the world to trade.', style: ConqueraText.label))
-          : AnimatedBuilder(
-              animation: Listenable.merge([widget.provinces, widget.players]),
-              builder: (context, _) => _body(uid),
-            ),
+          ),
+        );
+      case _View.home:
+        return _Shell(child: _homeListener(uid));
+    }
+  }
+
+  Widget _homeListener(String uid) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([widget.provinces, widget.players]),
+      builder: (context, _) => _home(uid),
     );
   }
 
-  Widget _body(String uid) {
+  // ───────────── home: stats, offer lists, "New trade" ─────────────
+
+  Widget _home(String uid) {
     final provs = widget.provinces.value;
     final players = widget.players.value;
     final now = ServerClock.now();
@@ -327,44 +1013,100 @@ class _TradeScreenState extends State<TradeScreen> {
     int live(List<TradeOffer> l) => l
         .where((o) => TradeService.problem(o, provs, players, now) == null)
         .length;
-    final rows = _sent ? sent : received;
+    final rows = _sentTab ? sent : received;
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: ConqueraSpace.md),
-          child: _Balance(players: widget.players, uid: uid),
-        ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: ConqueraSpace.md),
-          child: _Segments(
-            leftLabel: 'Received',
-            leftCount: live(received),
-            rightLabel: 'Sent',
-            rightCount: live(sent),
-            rightOn: _sent,
-            onChanged: (right) => setState(() => _sent = right),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(ConqueraSpace.md),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Header(title: 'Trade', onClose: _close),
+          const SizedBox(height: ConqueraSpace.sm),
+          Wrap(
+            spacing: ConqueraSpace.xl,
+            runSpacing: ConqueraSpace.md,
+            children: [
+              StatBlock(
+                label: 'Your gold',
+                child: _LiveGold(players: widget.players, uid: uid),
+              ),
+              StatBlock(
+                label: 'Received',
+                child: Text('${live(received)}', style: ConqueraText.value),
+              ),
+              StatBlock(
+                label: 'Sent',
+                child: Text('${live(sent)}', style: ConqueraText.value),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: rows.isEmpty
-              ? _Empty(sent: _sent)
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(
-                      ConqueraSpace.md, 0, ConqueraSpace.md, 130),
-                  itemCount: rows.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) =>
-                      _card(rows[i], uid, provs, players, now),
+          ..._rule(),
+          const _SectionTitle('Offers'),
+          const SizedBox(height: ConqueraSpace.sm),
+          Row(
+            children: [
+              _TabButton(
+                label: 'Received',
+                selected: !_sentTab,
+                onTap: () => setState(() => _sentTab = false),
+              ),
+              const SizedBox(width: ConqueraSpace.sm),
+              _TabButton(
+                label: 'Sent',
+                selected: _sentTab,
+                onTap: () => setState(() => _sentTab = true),
+              ),
+            ],
+          ),
+          const SizedBox(height: ConqueraSpace.sm),
+          if (rows.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: Text(
+                  _sentTab ? 'Nothing sent' : 'No offers',
+                  textAlign: TextAlign.center,
+                  style: ConqueraText.label,
                 ),
-        ),
-      ],
+              ),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 330),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: rows.length,
+                separatorBuilder: (_, __) =>
+                    Divider(height: 1, color: _faintLine),
+                itemBuilder: (_, i) => _row(rows[i], uid, provs, players, now),
+              ),
+            ),
+          ..._rule(),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton(
+              onPressed: _busy ? null : () => _go(_View.build),
+              child: const Text('New trade'),
+            ),
+          ),
+          if (_message != null)
+            Padding(
+              padding: const EdgeInsets.only(top: ConqueraSpace.md),
+              child: Text(
+                _message!,
+                style: ConqueraText.label.copyWith(
+                  color: _isError ? ConqueraColors.danger : ConqueraColors.ink,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
-  Widget _card(
+  Widget _row(
     TradeOffer o,
     String uid,
     Map<String, ProvinceState> provs,
@@ -397,64 +1139,66 @@ class _TradeScreenState extends State<TradeScreen> {
 
     return Opacity(
       opacity: problem == null ? 1 : 0.55,
-      child: Material(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _open(o, uid),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _lineColor),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: PlayerTag(
-                          name: mine ? o.toName : o.fromName,
-                          color: _hex(mine ? o.toColor : o.fromColor),
-                          style: ConqueraText.name,
+      child: InkWell(
+        onTap: () => _go(_View.offer, offerId: o.id),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: PlayerTag(
+                        name: mine ? o.toName : o.fromName,
+                        color: _hex(mine ? o.toColor : o.fromColor),
+                        style: ConqueraText.value.copyWith(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),
-                    Text(status,
-                        style: ConqueraText.label.copyWith(color: statusColor)),
-                    Icon(Icons.chevron_right,
-                        color: ConqueraColors.muted, size: 20),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _Line(
-                  icon: Icons.north_east,
-                  color: ConqueraColors.danger,
-                  label: 'You give',
-                  text: _summary(giveIds, giveGold, _name),
-                ),
-                const SizedBox(height: 8),
-                _Line(
-                  icon: Icons.south_west,
-                  color: ConqueraColors.success,
-                  label: 'You get',
-                  text: _summary(getIds, getGold, _name),
-                ),
-                if (toClear > 0) ...[
-                  const SizedBox(height: 10),
-                  _Pill(
-                    toClear == 1
-                        ? 'Destroy 1 building to accept'
-                        : 'Destroy $toClear buildings to accept',
-                    ConqueraColors.brass,
+                  ),
+                  Text(
+                    status,
+                    style: ConqueraText.label.copyWith(color: statusColor),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: ConqueraColors.muted,
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              _Line(
+                icon: Icons.north_east,
+                color: ConqueraColors.danger,
+                label: 'You give',
+                text: _summary(giveIds, giveGold, _name),
+              ),
+              const SizedBox(height: 4),
+              _Line(
+                icon: Icons.south_west,
+                color: ConqueraColors.success,
+                label: 'You get',
+                text: _summary(getIds, getGold, _name),
+              ),
+              if (toClear > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  toClear == 1
+                      ? 'Destroy 1 building to accept'
+                      : 'Destroy $toClear buildings to accept',
+                  style: ConqueraText.label.copyWith(
+                    color: ConqueraColors.brass,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -479,15 +1223,15 @@ class _Line extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _Badge(icon, color, size: 24),
-        const SizedBox(width: 10),
-        SizedBox(width: 58, child: Text(label, style: ConqueraText.label)),
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 6),
+        SizedBox(width: 56, child: Text(label, style: ConqueraText.label)),
         Expanded(
           child: Text(
             text,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: ConqueraText.value,
+            style: ConqueraText.value.copyWith(fontSize: 14),
           ),
         ),
       ],
@@ -495,181 +1239,40 @@ class _Line extends StatelessWidget {
   }
 }
 
-class _Empty extends StatelessWidget {
-  final bool sent;
-
-  const _Empty({required this.sent});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 100),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              sent ? Icons.outbox_outlined : Icons.inbox_outlined,
-              size: 56,
-              color: ConqueraColors.muted.withOpacity(0.6),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              sent ? 'Nothing sent yet' : 'No offers for you',
-              style: ConqueraText.name,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              sent
-                  ? 'Tap the + button to start a trade.'
-                  : 'Offers other players send you show up here.',
-              textAlign: TextAlign.center,
-              style: ConqueraText.label,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Two-way pill switch: Received | Sent.
-class _Segments extends StatelessWidget {
-  final String leftLabel;
-  final int leftCount;
-  final String rightLabel;
-  final int rightCount;
-  final bool rightOn;
-  final ValueChanged<bool> onChanged;
-
-  const _Segments({
-    required this.leftLabel,
-    required this.leftCount,
-    required this.rightLabel,
-    required this.rightCount,
-    required this.rightOn,
-    required this.onChanged,
-  });
-
-  Widget _seg(String label, int count, bool on, VoidCallback tap) {
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: tap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: on ? ConqueraColors.ink : Colors.transparent,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            count > 0 ? '$label · $count' : label,
-            style: ConqueraText.value.copyWith(
-              color: on ? ConqueraColors.onInk : ConqueraColors.muted,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _lineColor),
-      ),
-      child: Row(
-        children: [
-          _seg(leftLabel, leftCount, !rightOn, () => onChanged(false)),
-          _seg(rightLabel, rightCount, rightOn, () => onChanged(true)),
-        ],
-      ),
-    );
-  }
-}
-
-/// Your gold, ticking live.
-class _Balance extends StatefulWidget {
-  final ValueListenable<Map<String, PlayerState>> players;
-  final String uid;
-
-  const _Balance({required this.players, required this.uid});
-
-  @override
-  State<_Balance> createState() => _BalanceState();
-}
-
-class _BalanceState extends State<_Balance> {
-  Timer? _tick;
-
-  @override
-  void initState() {
-    super.initState();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _tick?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final gold =
-        widget.players.value[widget.uid]?.goldAt(ServerClock.now()) ?? 0;
-    return _Panel(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Text('Your gold', style: ConqueraText.label),
-          const Spacer(),
-          GoldAmount(gold.floor(), style: ConqueraText.figure, iconSize: 18),
-        ],
-      ),
-    );
-  }
-}
-
-// ───────────────────────── offer sheet ─────────────────────────
+// ───────────────────────── offer in detail ─────────────────────────
 
 /// An offer in detail, with accept / decline / cancel. The receiver also
 /// sees which of THEIR territories have a building and can destroy it here.
-class _OfferSheet extends StatefulWidget {
+class _OfferView extends StatefulWidget {
   final TradeOffer offer;
   final String uid;
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
   final Map<String, String> provinceNames;
+  final VoidCallback onBack;
+  final VoidCallback onClose;
   final VoidCallback onAccept;
   final VoidCallback onRemove;
   final Future<void> Function(String provinceId) onDestroy;
 
-  const _OfferSheet({
+  const _OfferView({
     required this.offer,
     required this.uid,
     required this.players,
     required this.provinces,
     required this.provinceNames,
+    required this.onBack,
+    required this.onClose,
     required this.onAccept,
     required this.onRemove,
     required this.onDestroy,
   });
 
   @override
-  State<_OfferSheet> createState() => _OfferSheetState();
+  State<_OfferView> createState() => _OfferViewState();
 }
 
-class _OfferSheetState extends State<_OfferSheet> {
+class _OfferViewState extends State<_OfferView> {
   bool _working = false;
   String? _error;
 
@@ -680,6 +1283,11 @@ class _OfferSheetState extends State<_OfferSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: ConqueraColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: ConqueraColors.divider),
+        ),
         title: Text('Destroy $label?', style: ConqueraText.name),
         content: Text(
           'The $label in ${_name(id)} is destroyed for good. There is no '
@@ -692,10 +1300,10 @@ class _OfferSheetState extends State<_OfferSheet> {
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Keep it'),
           ),
-          TextButton(
+          OutlinedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text('Destroy',
-                style: TextStyle(color: ConqueraColors.danger)),
+            style: _tinted(ConqueraColors.danger),
+            child: const Text('Destroy'),
           ),
         ],
       ),
@@ -716,14 +1324,6 @@ class _OfferSheetState extends State<_OfferSheet> {
     }
   }
 
-  Widget _title(IconData icon, Color color, String text) => Row(
-        children: [
-          _Badge(icon, color),
-          const SizedBox(width: 10),
-          Text(text, style: ConqueraText.name.copyWith(fontSize: 17)),
-        ],
-      );
-
   Widget _terr(
     String id, {
     ProvinceState? building,
@@ -731,16 +1331,19 @@ class _OfferSheetState extends State<_OfferSheet> {
   }) {
     final has = building != null;
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Icon(Icons.flag_outlined, size: 18, color: ConqueraColors.muted),
+          Icon(Icons.flag_outlined, size: 16, color: ConqueraColors.muted),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_name(id), style: ConqueraText.value),
+                Text(
+                  _name(id),
+                  style: ConqueraText.value.copyWith(fontSize: 16),
+                ),
                 if (has)
                   Text(
                     'Has a ${building!.buildingLabel}. Must be destroyed first.',
@@ -752,15 +1355,9 @@ class _OfferSheetState extends State<_OfferSheet> {
           ),
           if (has && canDestroy)
             OutlinedButton(
-              onPressed: _working
-                  ? null
-                  : () => _destroy(id, building!.buildingLabel),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: ConqueraColors.danger,
-                side: BorderSide(color: ConqueraColors.danger),
-                minimumSize: const Size(0, 34),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-              ),
+              onPressed:
+                  _working ? null : () => _destroy(id, building!.buildingLabel),
+              style: _tinted(ConqueraColors.danger, height: 30),
               child: const Text('Destroy'),
             ),
         ],
@@ -768,23 +1365,46 @@ class _OfferSheetState extends State<_OfferSheet> {
     );
   }
 
-  Widget _gold(int gold) => Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: GoldAmount(gold,
-            style: ConqueraText.figure.copyWith(fontSize: 17), iconSize: 16),
-      );
-
-  Widget _nothing() => Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Text('Nothing', style: ConqueraText.label),
-      );
+  Widget _side({
+    required String title,
+    required IconData icon,
+    required Color tint,
+    required List<String> ids,
+    required int gold,
+    required Widget Function(String id) terr,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: tint),
+            const SizedBox(width: 6),
+            _SectionTitle(title),
+          ],
+        ),
+        const SizedBox(height: ConqueraSpace.sm),
+        for (final id in ids) terr(id),
+        if (gold > 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: _Gold(gold, style: ConqueraText.figure, iconSize: 18),
+          ),
+        if (ids.isEmpty && gold <= 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('Nothing', style: ConqueraText.label),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final offer = widget.offer;
     final uid = widget.uid;
-    return AnimatedBuilder(
-      animation: Listenable.merge([widget.players, widget.provinces]),
+    return ListenableBuilder(
+      listenable: Listenable.merge([widget.players, widget.provinces]),
       builder: (context, _) {
         final provs = widget.provinces.value;
         final mine = offer.fromId == uid;
@@ -827,135 +1447,118 @@ class _OfferSheetState extends State<_OfferSheet> {
                   ? 'Destroy the building below to accept this trade.'
                   : 'Destroy the buildings below to accept this trade.';
             } else {
-              note = _left(offer.timeLeft(now));
+              note = '';
             }
         }
         final bad = problem != null || short;
         final warn = !bad && toClear.isNotEmpty;
 
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * 0.9,
-            ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(
-                  ConqueraSpace.md, 10, ConqueraSpace.md, ConqueraSpace.md),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Header(
+                title: mine ? 'Your offer' : 'Offer',
+                onBack: widget.onBack,
+                onClose: widget.onClose,
+              ),
+              const SizedBox(height: ConqueraSpace.sm),
+              Wrap(
+                spacing: ConqueraSpace.xl,
+                runSpacing: ConqueraSpace.md,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: ConqueraColors.divider,
-                        borderRadius: BorderRadius.circular(4),
+                  StatBlock(
+                    label: 'From',
+                    child: PlayerTag(
+                      name: offer.fromName,
+                      color: _hex(offer.fromColor),
+                      style: ConqueraText.value,
+                    ),
+                  ),
+                  StatBlock(
+                    label: 'To',
+                    child: PlayerTag(
+                      name: offer.toName,
+                      color: _hex(offer.toColor),
+                      style: ConqueraText.value,
+                    ),
+                  ),
+                  StatBlock(
+                    label: 'Expires in',
+                    child: Text(
+                      problem == TradeProblem.expired
+                          ? 'Expired'
+                          : _span(offer.timeLeft(now)),
+                      style: ConqueraText.value.copyWith(
+                        color: problem == TradeProblem.expired
+                            ? ConqueraColors.danger
+                            : null,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Text(mine ? 'Offer to' : 'Offer from',
-                          style: ConqueraText.label),
-                      const SizedBox(width: ConqueraSpace.sm),
-                      Flexible(
-                        child: PlayerTag(
-                          name: other,
-                          color: _hex(mine ? offer.toColor : offer.fromColor),
-                          style: ConqueraText.name,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  _Panel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _title(Icons.north_east, ConqueraColors.danger,
-                            'You give'),
-                        for (final id in giveIds)
-                          _terr(
-                            id,
-                            building: toClear.contains(id) ? provs[id] : null,
-                            canDestroy: canDestroy,
-                          ),
-                        if (giveGold > 0) _gold(giveGold),
-                        if (giveIds.isEmpty && giveGold <= 0) _nothing(),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _Panel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _title(Icons.south_west, ConqueraColors.success,
-                            'You get'),
-                        for (final id in getIds) _terr(id),
-                        if (getGold > 0) _gold(getGold),
-                        if (getIds.isEmpty && getGold <= 0) _nothing(),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _error ?? note,
-                    style: ConqueraText.label.copyWith(
-                      color: _error != null || bad
-                          ? ConqueraColors.danger
-                          : warn
-                              ? ConqueraColors.brass
-                              : ConqueraColors.muted,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _working ? null : widget.onRemove,
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(0, 50),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: Text(mine
-                              ? (problem == null ? 'Cancel offer' : 'Remove')
-                              : (problem == null ? 'Decline' : 'Remove')),
-                        ),
-                      ),
-                      if (!mine) ...[
-                        const SizedBox(width: ConqueraSpace.sm),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: (bad || warn || _working)
-                                ? null
-                                : widget.onAccept,
-                            style: ElevatedButton.styleFrom(
-                              elevation: 0,
-                              minimumSize: const Size(0, 50),
-                              backgroundColor: ConqueraColors.success,
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor:
-                                  ConqueraColors.muted.withOpacity(0.25),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                            child: const Text('Accept'),
-                          ),
-                        ),
-                      ],
-                    ],
                   ),
                 ],
               ),
-            ),
+              ..._rule(),
+              _side(
+                title: 'You give',
+                icon: Icons.north_east,
+                tint: ConqueraColors.danger,
+                ids: giveIds,
+                gold: giveGold,
+                terr: (id) => _terr(
+                  id,
+                  building: toClear.contains(id) ? provs[id] : null,
+                  canDestroy: canDestroy,
+                ),
+              ),
+              ..._rule(),
+              _side(
+                title: 'You get',
+                icon: Icons.south_west,
+                tint: ConqueraColors.success,
+                ids: getIds,
+                gold: getGold,
+                terr: (id) => _terr(id),
+              ),
+              if ((_error ?? note).isNotEmpty) ...[
+                const SizedBox(height: ConqueraSpace.md),
+                Text(
+                  _error ?? note,
+                  style: ConqueraText.label.copyWith(
+                    color: _error != null || bad
+                        ? ConqueraColors.danger
+                        : warn
+                            ? ConqueraColors.brass
+                            : ConqueraColors.muted,
+                  ),
+                ),
+              ],
+              const SizedBox(height: ConqueraSpace.md),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton(
+                    onPressed: _working ? null : widget.onRemove,
+                    child: Text(
+                      mine
+                          ? (problem == null ? 'Cancel offer' : 'Remove')
+                          : (problem == null ? 'Decline' : 'Remove'),
+                    ),
+                  ),
+                  if (!mine) ...[
+                    const SizedBox(width: ConqueraSpace.sm),
+                    OutlinedButton(
+                      onPressed:
+                          (bad || warn || _working) ? null : widget.onAccept,
+                      style: _tinted(ConqueraColors.success),
+                      child: const Text('Accept'),
+                    ),
+                  ],
+                ],
+              ),
+            ],
           ),
         );
       },
@@ -963,7 +1566,7 @@ class _OfferSheetState extends State<_OfferSheet> {
   }
 }
 
-// ───────────────────────── builder sheet ─────────────────────────
+// ───────────────────────── new trade ─────────────────────────
 
 class _Opt {
   final String id;
@@ -974,34 +1577,48 @@ class _Opt {
   const _Opt(this.id, this.name, {this.locked = false});
 }
 
-/// The whole "new trade" flow in one sheet: who, what you give, what you
+class _Cand {
+  final PlayerState player;
+  final int rank;
+  final int count;
+  const _Cand(this.player, this.rank, this.count);
+}
+
+/// The whole "new trade" flow in one view: who, what you give, what you
 /// get, send.
-class _BuilderSheet extends StatefulWidget {
+class _Builder extends StatefulWidget {
   final String gameId;
   final String myUid;
   final TradeService service;
   final ValueListenable<Map<String, PlayerState>> players;
   final ValueListenable<Map<String, ProvinceState>> provinces;
   final Map<String, String> provinceNames;
+  final VoidCallback onBack;
+  final VoidCallback onClose;
+  final VoidCallback onSent;
 
-  const _BuilderSheet({
+  const _Builder({
     required this.gameId,
     required this.myUid,
     required this.service,
     required this.players,
     required this.provinces,
     required this.provinceNames,
+    required this.onBack,
+    required this.onClose,
+    required this.onSent,
   });
 
   @override
-  State<_BuilderSheet> createState() => _BuilderSheetState();
+  State<_Builder> createState() => _BuilderState();
 }
 
-class _BuilderSheetState extends State<_BuilderSheet> {
-  final TextEditingController _giveGold = TextEditingController();
-  final TextEditingController _getGold = TextEditingController();
+class _BuilderState extends State<_Builder> {
+  final TextEditingController _search = TextEditingController();
   final Set<String> _give = {};
   final Set<String> _get = {};
+  int _giveGold = 0;
+  int _getGold = 0;
   String? _partnerId;
   String _playerQuery = '';
   bool _busy = false;
@@ -1009,13 +1626,11 @@ class _BuilderSheetState extends State<_BuilderSheet> {
 
   @override
   void dispose() {
-    _giveGold.dispose();
-    _getGold.dispose();
+    _search.dispose();
     super.dispose();
   }
 
   String _name(String id) => widget.provinceNames[id] ?? id;
-  int _amount(TextEditingController c) => int.tryParse(c.text) ?? 0;
 
   PlayerState? get _partner {
     final id = _partnerId;
@@ -1039,29 +1654,59 @@ class _BuilderSheetState extends State<_BuilderSheet> {
           if (p.ownerId == owner) _Opt(p.id, _name(p.id)),
       ]..sort((a, b) => a.name.compareTo(b.name));
 
+  /// Other players that still own land, ranked like the leaderboard
+  /// (total power, then name).
+  List<_Cand> _candidates() {
+    final power = <String, int>{};
+    final count = <String, int>{};
+    widget.provinces.value.forEach((id, s) {
+      final o = s.ownerId;
+      if (o == null) return;
+      power[o] = (power[o] ?? 0) + s.troops.floor();
+      count[o] = (count[o] ?? 0) + 1;
+    });
+    final ranked = widget.players.value.values.toList()
+      ..sort((a, b) {
+        final d = (power[b.uid] ?? 0).compareTo(power[a.uid] ?? 0);
+        return d != 0 ? d : a.displayName.compareTo(b.displayName);
+      });
+    final out = <_Cand>[];
+    for (var i = 0; i < ranked.length; i++) {
+      final p = ranked[i];
+      final c = count[p.uid] ?? 0;
+      if (p.uid == widget.myUid || c == 0) continue;
+      out.add(_Cand(p, i + 1, c));
+    }
+    return out;
+  }
+
   void _pickPartner(PlayerState p) {
     setState(() {
-      if (_partnerId != p.uid) _get.clear();
+      if (_partnerId != p.uid) {
+        _get.clear();
+        _getGold = 0;
+      }
       _partnerId = p.uid;
       _error = null;
     });
   }
 
+  int _myGoldNow() =>
+      (widget.players.value[widget.myUid]?.goldAt(ServerClock.now()) ?? 0)
+          .floor();
+
   /// Why the offer can't be sent yet (null = ready).
   String? get _problem {
     final partner = _partner;
     if (partner == null) return 'Choose who to trade with.';
-    final give = _amount(_giveGold);
-    final take = _amount(_getGold);
-    if (_give.isEmpty && _get.isEmpty && give == 0 && take == 0) {
+    if (_give.isEmpty && _get.isEmpty && _giveGold == 0 && _getGold == 0) {
       return 'Add something to the trade.';
     }
-    if (give > TradeService.maxGold || take > TradeService.maxGold) {
+    if (_giveGold > TradeService.maxGold || _getGold > TradeService.maxGold) {
       return 'Gold is limited to ${_n(TradeService.maxGold)}.';
     }
-    final mine =
-        widget.players.value[widget.myUid]?.goldAt(ServerClock.now()) ?? 0;
-    if (give > mine) return 'You only have ${_n(mine.floor())} gold.';
+    final mine = _myGoldNow();
+    if (_giveGold > mine) return 'You only have ${_n(mine)} gold.';
     if (_owned(widget.myUid) - _give.length + _get.length < 1) {
       return 'Keep at least one territory.';
     }
@@ -1070,6 +1715,9 @@ class _BuilderSheetState extends State<_BuilderSheet> {
     }
     return null;
   }
+
+  bool get _touched =>
+      _give.isNotEmpty || _get.isNotEmpty || _giveGold > 0 || _getGold > 0;
 
   Future<void> _send() async {
     final partner = _partner;
@@ -1084,11 +1732,11 @@ class _BuilderSheetState extends State<_BuilderSheet> {
         uid: widget.myUid,
         toId: partner.uid,
         giveProvinces: _give.toList(),
-        giveGold: _amount(_giveGold),
+        giveGold: _giveGold,
         takeProvinces: _get.toList(),
-        takeGold: _amount(_getGold),
+        takeGold: _getGold,
       );
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) widget.onSent();
     } on GameActionException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -1098,272 +1746,275 @@ class _BuilderSheetState extends State<_BuilderSheet> {
     }
   }
 
-  bool get _touched =>
-      _give.isNotEmpty ||
-      _get.isNotEmpty ||
-      _giveGold.text.isNotEmpty ||
-      _getGold.text.isNotEmpty;
+  Future<void> _pickTerritories({
+    required String title,
+    required List<_Opt> options,
+    required Set<String> target,
+  }) async {
+    final res = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _TerritoryPicker(
+        title: title,
+        options: options,
+        initial: {...target},
+      ),
+    );
+    if (res == null || !mounted) return;
+    setState(() {
+      target
+        ..clear()
+        ..addAll(res);
+      _error = null;
+    });
+  }
 
-  Widget _playerPicker() {
-    final counts = <String, int>{};
-    for (final p in widget.provinces.value.values) {
-      final o = p.ownerId;
-      if (o != null) counts[o] = (counts[o] ?? 0) + 1;
+  // ───────────── who to trade with (leaderboard-style rows) ─────────────
+
+  Widget _playerRow(_Cand c, {required bool selected, VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        color: selected ? ConqueraColors.ink.withAlpha(14) : null,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              child: Text(
+                '${c.rank}',
+                style: ConqueraText.label.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            Expanded(
+              child: PlayerTag(
+                name: c.player.displayName,
+                color: c.player.color,
+                style: ConqueraText.value.copyWith(
+                  fontSize: 16,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+            const SizedBox(width: ConqueraSpace.sm),
+            Text(
+              c.count == 1 ? '1 territory' : '${c.count} territories',
+              style: ConqueraText.value.copyWith(
+                fontWeight: FontWeight.w600,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _partnerSection(List<_Cand> all) {
+    if (all.isEmpty) {
+      return [Text('No other players yet.', style: ConqueraText.label)];
     }
-    final all = [
-      for (final p in widget.players.value.values)
-        if (p.uid != widget.myUid && (counts[p.uid] ?? 0) > 0) p,
-    ]..sort((a, b) =>
-        a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
-    final shown = [
-      for (final p in all)
-        if (p.displayName.toLowerCase().contains(_playerQuery.toLowerCase()) ||
-            p.uid == _partnerId)
-          p,
-    ];
 
+    final partner = _partner;
+    if (partner != null) {
+      final chosen = all.where((c) => c.player.uid == partner.uid);
+      if (chosen.isNotEmpty) {
+        return [
+          Row(
+            children: [
+              Expanded(child: _playerRow(chosen.first, selected: true)),
+              const SizedBox(width: ConqueraSpace.sm),
+              OutlinedButton(
+                onPressed: () => setState(() {
+                  _partnerId = null;
+                  _search.clear();
+                  _playerQuery = '';
+                }),
+                style: _tinted(ConqueraColors.ink, height: 30),
+                child: const Text('Change'),
+              ),
+            ],
+          ),
+        ];
+      }
+    }
+
+    final q = _playerQuery.toLowerCase();
+    final shown = [
+      for (final c in all)
+        if (c.player.displayName.toLowerCase().contains(q)) c,
+    ];
+    return [
+      if (all.length > 6) ...[
+        ConqueraTextField(
+          controller: _search,
+          hint: 'Search players',
+          onChanged: (v) => setState(() => _playerQuery = v),
+        ),
+        const SizedBox(height: ConqueraSpace.sm),
+      ],
+      if (shown.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Text('No match.', style: ConqueraText.label),
+        )
+      else
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 240),
+          child: ListView.builder(
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: shown.length,
+            itemBuilder: (_, i) => _playerRow(
+              shown[i],
+              selected: false,
+              onTap: () => _pickPartner(shown[i].player),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  // ───────────── one side of the trade ─────────────
+
+  Widget _side({
+    required String pickerTitle,
+    required IconData icon,
+    required Color tint,
+    required Set<String> selected,
+    required List<_Opt> options,
+    required int gold,
+    required int goldMax,
+    required String caption,
+    required ValueChanged<int> onGold,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Trade with', style: ConqueraText.label),
-        const SizedBox(height: 8),
-        if (all.length > 6) ...[
-          TextField(
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search players',
-              prefixIcon: const Icon(Icons.search, size: 18),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onChanged: (v) => setState(() => _playerQuery = v),
-          ),
-          const SizedBox(height: 8),
-        ],
-        if (all.isEmpty)
-          Text('No other players yet.', style: ConqueraText.label)
-        else
-          SizedBox(
-            height: 46,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: shown.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final p = shown[i];
-                final on = p.uid == _partnerId;
-                return GestureDetector(
-                  onTap: () => _pickPartner(p),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: on
-                          ? ConqueraColors.ink.withOpacity(0.10)
-                          : _cardColor,
-                      borderRadius: BorderRadius.circular(23),
-                      border: Border.all(
-                        color: on ? ConqueraColors.ink : _lineColor,
-                        width: on ? 2 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        PlayerTag(name: p.displayName, color: p.color),
-                        const SizedBox(width: 8),
-                        Text('${counts[p.uid] ?? 0}',
-                            style: ConqueraText.label),
-                      ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _DirSlot(icon: icon, color: tint, count: selected.length),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _PickerField(
+                    hint: 'Select territories',
+                    label: selected.isEmpty
+                        ? null
+                        : '${selected.length} of '
+                            '${TradeService.maxProvincesPerSide} selected',
+                    onTap: () => _pickTerritories(
+                      title: pickerTitle,
+                      options: options,
+                      target: selected,
                     ),
                   ),
-                );
-              },
+                  if (selected.isNotEmpty) ...[
+                    const SizedBox(height: ConqueraSpace.sm),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final id in selected)
+                          _Chip(
+                            text: _name(id),
+                            onRemove: () => setState(() {
+                              selected.remove(id);
+                              _error = null;
+                            }),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
+          ],
+        ),
+        const SizedBox(height: ConqueraSpace.sm),
+        _GoldSlider(
+          value: gold,
+          max: goldMax,
+          caption: caption,
+          onChanged: (v) => setState(() {
+            onGold(v);
+            _error = null;
+          }),
+        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge([widget.players, widget.provinces]),
+    return ListenableBuilder(
+      listenable: Listenable.merge([widget.players, widget.provinces]),
       builder: (context, _) {
         final partner = _partner;
         final problem = _problem;
-        final myGold =
-            widget.players.value[widget.myUid]?.goldAt(ServerClock.now()) ?? 0;
+        final myGold = _myGoldNow();
         final shownError =
             _error ?? ((problem != null && _touched) ? problem : null);
 
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(context).bottom,
-          ),
-          child: FractionallySizedBox(
-            heightFactor: 0.94,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 10),
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: ConqueraColors.divider,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(ConqueraSpace.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Header(
+                title: 'New trade',
+                onBack: widget.onBack,
+                onClose: widget.onClose,
+              ),
+              const SizedBox(height: ConqueraSpace.sm),
+              const _SectionTitle('Trade with'),
+              const SizedBox(height: ConqueraSpace.sm),
+              ..._partnerSection(_candidates()),
+              if (partner != null) ...[
+                ..._rule(),
+                const _SectionTitle('You give'),
+                const SizedBox(height: ConqueraSpace.sm),
+                _side(
+                  pickerTitle: 'You give',
+                  icon: Icons.north_east,
+                  tint: ConqueraColors.danger,
+                  selected: _give,
+                  options: _myOptions(),
+                  gold: _giveGold,
+                  goldMax: math.min(myGold, TradeService.maxGold),
+                  caption: 'You have ${_n(myGold)}',
+                  onGold: (v) => _giveGold = v,
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      ConqueraSpace.md, 10, 6, 0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text('New trade',
-                            style: ConqueraText.title.copyWith(fontSize: 24)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ],
-                  ),
+                ..._rule(),
+                const _SectionTitle('You get'),
+                const SizedBox(height: ConqueraSpace.sm),
+                _side(
+                  pickerTitle: 'You get',
+                  icon: Icons.south_west,
+                  tint: ConqueraColors.success,
+                  selected: _get,
+                  options: _theirOptions(partner.uid),
+                  gold: _getGold,
+                  goldMax: _getGoldCap,
+                  caption: 'Max ${_n(_getGoldCap)}',
+                  onGold: (v) => _getGold = v,
                 ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(
-                        ConqueraSpace.md, 8, ConqueraSpace.md, 16),
-                    children: [
-                      _playerPicker(),
-                      const SizedBox(height: 16),
-                      if (partner == null)
-                        _Panel(
-                          child: Row(
-                            children: [
-                              Icon(Icons.touch_app_outlined,
-                                  color: ConqueraColors.muted),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  'Pick a player above to build your offer.',
-                                  style: ConqueraText.label,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      else ...[
-                        _SidePanel(
-                          key: const ValueKey('give'),
-                          title: 'You give',
-                          icon: Icons.north_east,
-                          tint: ConqueraColors.danger,
-                          options: _myOptions(),
-                          selected: _give,
-                          names: _name,
-                          goldController: _giveGold,
-                          goldHint: 'You have ${_n(myGold.floor())}',
-                          onMax: () => setState(() {
-                            final v = myGold.floor();
-                            _giveGold.text = (v > TradeService.maxGold
-                                    ? TradeService.maxGold
-                                    : v)
-                                .toString();
-                            _error = null;
-                          }),
-                          onChanged: () => setState(() => _error = null),
-                        ),
-                        const SizedBox(height: 12),
-                        _SidePanel(
-                          key: ValueKey('get-${partner.uid}'),
-                          title: 'You get',
-                          icon: Icons.south_west,
-                          tint: ConqueraColors.success,
-                          options: _theirOptions(partner.uid),
-                          selected: _get,
-                          names: _name,
-                          goldController: _getGold,
-                          goldHint: 'From ${partner.displayName}',
-                          onChanged: () => setState(() => _error = null),
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          'Only you and ${partner.displayName} can see this '
-                          'offer. It stays open for 12 hours. A territory '
-                          'with a building cannot change hands, and the '
-                          'offer switches off if a territory changes owner '
-                          'or you hold less gold than you offered. Troops '
-                          'stay with the territory.',
-                          style: ConqueraText.label,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(
-                      ConqueraSpace.md, 12, ConqueraSpace.md, 12),
-                  decoration: BoxDecoration(
-                    color: ConqueraColors.surface,
-                    border: Border(top: BorderSide(color: _lineColor)),
-                  ),
-                  child: SafeArea(
-                    top: false,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (shownError != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Text(
-                              shownError,
-                              style: ConqueraText.label
-                                  .copyWith(color: ConqueraColors.danger),
-                            ),
-                          )
-                        else if (partner != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Text(
-                              'Give ${_summary(_give.toList(), _amount(_giveGold), _name)}'
-                              '   ·   '
-                              'Get ${_summary(_get.toList(), _amount(_getGold), _name)}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: ConqueraText.label,
-                            ),
-                          ),
-                        ElevatedButton.icon(
-                          onPressed: (_busy || problem != null) ? null : _send,
-                          icon: const Icon(Icons.send_rounded, size: 18),
-                          label: Text(_busy ? 'Sending...' : 'Send offer'),
-                          style: ElevatedButton.styleFrom(
-                            elevation: 0,
-                            minimumSize: const Size.fromHeight(54),
-                            backgroundColor: ConqueraColors.ink,
-                            foregroundColor: ConqueraColors.onInk,
-                            disabledBackgroundColor:
-                                ConqueraColors.muted.withOpacity(0.25),
-                            textStyle: ConqueraText.button.copyWith(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                ..._rule(),
+                _ActionRow(
+                  info: shownError ?? '',
+                  infoColor: ConqueraColors.danger,
+                  button: FilledButton(
+                    onPressed: (_busy || problem != null) ? null : _send,
+                    child: Text(_busy ? 'Sending...' : 'Send offer'),
                   ),
                 ),
               ],
-            ),
+            ],
           ),
         );
       },
@@ -1371,254 +2022,165 @@ class _BuilderSheetState extends State<_BuilderSheet> {
   }
 }
 
-/// One side of the trade: territory chips, an inline picker that opens in
-/// place, and a gold field.
-class _SidePanel extends StatefulWidget {
-  final String title;
-  final IconData icon;
-  final Color tint;
-  final List<_Opt> options;
-  final Set<String> selected;
-  final String Function(String) names;
-  final TextEditingController goldController;
-  final String goldHint;
-  final VoidCallback? onMax;
-  final VoidCallback onChanged;
+// ───────────────────────── territory picker ─────────────────────────
 
-  const _SidePanel({
-    super.key,
+/// The "Select territories" window: a searchable list, tap to tick. Returns
+/// the chosen ids when Done is pressed.
+class _TerritoryPicker extends StatefulWidget {
+  final String title;
+  final List<_Opt> options;
+  final Set<String> initial;
+
+  const _TerritoryPicker({
     required this.title,
-    required this.icon,
-    required this.tint,
     required this.options,
-    required this.selected,
-    required this.names,
-    required this.goldController,
-    required this.goldHint,
-    required this.onChanged,
-    this.onMax,
+    required this.initial,
   });
 
   @override
-  State<_SidePanel> createState() => _SidePanelState();
+  State<_TerritoryPicker> createState() => _TerritoryPickerState();
 }
 
-class _SidePanelState extends State<_SidePanel> {
-  bool _open = false;
+class _TerritoryPickerState extends State<_TerritoryPicker> {
+  late final Set<String> _sel = {...widget.initial};
+  final TextEditingController _q = TextEditingController();
   String _query = '';
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
 
   void _toggle(_Opt o) {
     if (o.locked) return;
-    final s = widget.selected;
     setState(() {
-      if (s.contains(o.id)) {
-        s.remove(o.id);
-      } else if (s.length < TradeService.maxProvincesPerSide) {
-        s.add(o.id);
+      if (_sel.contains(o.id)) {
+        _sel.remove(o.id);
+      } else if (_sel.length < TradeService.maxProvincesPerSide) {
+        _sel.add(o.id);
       }
     });
-    widget.onChanged();
-  }
-
-  Widget _picker() {
-    final shown = [
-      for (final o in widget.options)
-        if (o.name.toLowerCase().contains(_query.toLowerCase())) o,
-    ];
-    return Container(
-      margin: const EdgeInsets.only(top: 10),
-      height: 270,
-      decoration: BoxDecoration(
-        color: ConqueraColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _lineColor),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: TextField(
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Search territories',
-                prefixIcon: const Icon(Icons.search, size: 18),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onChanged: (v) => setState(() => _query = v),
-            ),
-          ),
-          Divider(height: 1, color: _lineColor),
-          Expanded(
-            child: shown.isEmpty
-                ? Center(
-                    child: Text(
-                      widget.options.isEmpty
-                          ? 'No territories.'
-                          : 'No match.',
-                      style: ConqueraText.label,
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: shown.length,
-                    itemBuilder: (_, i) {
-                      final o = shown[i];
-                      final on = widget.selected.contains(o.id);
-                      return InkWell(
-                        onTap: o.locked ? null : () => _toggle(o),
-                        child: Opacity(
-                          opacity: o.locked ? 0.45 : 1,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 11),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  o.locked
-                                      ? Icons.lock_outline
-                                      : on
-                                          ? Icons.check_circle
-                                          : Icons.radio_button_unchecked,
-                                  size: 20,
-                                  color: on
-                                      ? widget.tint
-                                      : ConqueraColors.muted,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child:
-                                      Text(o.name, style: ConqueraText.value),
-                                ),
-                                if (o.locked)
-                                  Text('Has a building',
-                                      style: ConqueraText.label),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.selected;
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _Badge(widget.icon, widget.tint),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(widget.title,
-                    style: ConqueraText.name.copyWith(fontSize: 17)),
+    final q = _query.toLowerCase();
+    final shown = [
+      for (final o in widget.options)
+        if (o.name.toLowerCase().contains(q)) o,
+    ];
+
+    return _Shell(
+      child: Padding(
+        padding: const EdgeInsets.all(ConqueraSpace.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _Header(
+              title: 'Select territories',
+              onClose: () => Navigator.of(context).pop(),
+            ),
+            const SizedBox(height: ConqueraSpace.sm),
+            if (widget.options.length > 8) ...[
+              ConqueraTextField(
+                controller: _q,
+                hint: 'Search territories',
+                onChanged: (v) => setState(() => _query = v),
               ),
-              Text(
-                '${s.length} / ${TradeService.maxProvincesPerSide}',
-                style: ConqueraText.label,
-              ),
+              const SizedBox(height: ConqueraSpace.sm),
             ],
-          ),
-          if (s.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final id in s)
-                  InputChip(
-                    label: Text(widget.names(id),
-                        style: ConqueraText.value.copyWith(fontSize: 13.5)),
-                    backgroundColor: ConqueraColors.surface,
-                    side: BorderSide(color: _lineColor),
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    deleteIconColor: ConqueraColors.muted,
-                    onDeleted: () {
-                      setState(() => s.remove(id));
-                      widget.onChanged();
-                    },
-                  ),
-              ],
+            _SectionTitle(
+              '${widget.title}  ·  ${_sel.length} / '
+              '${TradeService.maxProvincesPerSide}',
+            ),
+            const SizedBox(height: ConqueraSpace.xs),
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: shown.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: Center(
+                          child: Text(
+                            widget.options.isEmpty
+                                ? 'No territories.'
+                                : 'No match.',
+                            style: ConqueraText.label,
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        itemCount: shown.length,
+                        itemBuilder: (_, i) {
+                          final o = shown[i];
+                          final on = _sel.contains(o.id);
+                          return InkWell(
+                            onTap: o.locked ? null : () => _toggle(o),
+                            child: Opacity(
+                              opacity: o.locked ? 0.45 : 1,
+                              child: Container(
+                                color: on
+                                    ? ConqueraColors.ink.withAlpha(14)
+                                    : null,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 12,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      o.locked
+                                          ? Icons.lock_outline
+                                          : on
+                                              ? Icons.check_circle
+                                              : Icons.radio_button_unchecked,
+                                      size: 20,
+                                      color: on
+                                          ? ConqueraColors.ink
+                                          : ConqueraColors.muted,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        o.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: ConqueraText.value.copyWith(
+                                          fontSize: 16,
+                                          fontWeight: on
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    if (o.locked)
+                                      Text(
+                                        'Has a building',
+                                        style: ConqueraText.label,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ),
+            const SizedBox(height: ConqueraSpace.md),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop({..._sel}),
+                child: Text(_sel.isEmpty ? 'Done' : 'Done (${_sel.length})'),
+              ),
             ),
           ],
-          const SizedBox(height: 6),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => setState(() => _open = !_open),
-              icon: Icon(_open ? Icons.expand_less : Icons.add, size: 18),
-              label: Text(_open
-                  ? 'Done'
-                  : s.isEmpty
-                      ? 'Add territories'
-                      : 'Add more'),
-            ),
-          ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            alignment: Alignment.topCenter,
-            child: _open ? _picker() : const SizedBox(width: double.infinity),
-          ),
-          const SizedBox(height: 10),
-          Divider(height: 1, color: _lineColor),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: widget.goldController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(8),
-                  ],
-                  style: ConqueraText.figure.copyWith(fontSize: 17),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: '0 gold',
-                    helperText: widget.goldHint,
-                    prefixIcon: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 10),
-                      child: GoldIcon(size: 18),
-                    ),
-                    prefixIconConstraints:
-                        const BoxConstraints(minWidth: 0, minHeight: 0),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onChanged: (_) => widget.onChanged(),
-                ),
-              ),
-              if (widget.onMax != null) ...[
-                const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 18),
-                  child: OutlinedButton(
-                    onPressed: widget.onMax,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Max'),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }

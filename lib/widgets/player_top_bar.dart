@@ -39,6 +39,10 @@ class PlayerTopBar extends StatefulWidget implements PreferredSizeWidget {
 
   static const double height = 56;
 
+  /// Space kept free under the content (menu, name, gold), so the content
+  /// sits a little high and the income rate doesn't touch the map.
+  static const double _lift = 6;
+
   @override
   Size get preferredSize => const Size.fromHeight(height);
 
@@ -78,8 +82,11 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
         child: SizedBox(
           height: PlayerTopBar.height,
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: ConqueraSpace.md),
+            padding: const EdgeInsets.only(
+              left: ConqueraSpace.md,
+              right: ConqueraSpace.md,
+              bottom: PlayerTopBar._lift,
+            ),
             child: StreamBuilder<PlayerState?>(
               stream: _stream,
               builder: (context, snapshot) {
@@ -123,10 +130,8 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
                           onTap: widget.onGoldPressed,
                           borderRadius: BorderRadius.circular(10),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
                             child: _GoldReadout(
                               gold: player?.goldAt(ServerClock.now()),
                               rate: player?.goldRate,
@@ -146,7 +151,8 @@ class _PlayerTopBarState extends State<PlayerTopBar> {
   }
 }
 
-/// Coin and current gold, with the income rate underneath.
+/// Coin and current gold, level with the player name in the middle of the
+/// bar, with the income rate hanging underneath.
 class _GoldReadout extends StatelessWidget {
   final double? gold;
   final double? rate;
@@ -177,24 +183,33 @@ class _GoldReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const GoldIcon(size: 18),
-            const SizedBox(width: ConqueraSpace.sm),
-            Text(
-              gold == null ? '--' : _thousands(gold!),
-              style: ConqueraText.figure,
+    const area = PlayerTopBar.height - PlayerTopBar._lift;
+    return SizedBox(
+      height: area,
+      child: Stack(
+        alignment: Alignment.centerRight,
+        clipBehavior: Clip.none,
+        children: [
+          // Centered on the bar, so it sits on the same line as the name.
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const GoldIcon(size: 18),
+              const SizedBox(width: ConqueraSpace.sm),
+              Text(
+                gold == null ? '--' : _thousands(gold!),
+                style: ConqueraText.figure,
+              ),
+            ],
+          ),
+          if (rate != null)
+            Positioned(
+              right: 0,
+              top: area / 2 + 12,
+              child: Text(_rateLabel(rate!), style: ConqueraText.label),
             ),
-          ],
-        ),
-        if (rate != null)
-          Text(_rateLabel(rate!), style: ConqueraText.label),
-      ],
+        ],
+      ),
     );
   }
 }

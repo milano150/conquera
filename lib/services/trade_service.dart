@@ -363,6 +363,20 @@ class TradeService {
         tx.update(provSnaps[id]!.reference, {'ownerId': offer.fromId});
       }
       tx.delete(offerRef);
+      // Tell the creator their offer was accepted (shown in Notifications).
+      tx.set(_game(gameId).collection('tradeResults').doc(), {
+        'fromId': offer.fromId,
+        'fromName': offer.fromName,
+        'fromColor': offer.fromColor,
+        'toId': offer.toId,
+        'toName': offer.toName,
+        'toColor': offer.toColor,
+        'giveProvinces': offer.giveProvinces,
+        'giveGold': offer.giveGold,
+        'takeProvinces': offer.takeProvinces,
+        'takeGold': offer.takeGold,
+        'at': FieldValue.serverTimestamp(),
+      });
       tx.update(
         fromRef,
         _settled(
