@@ -288,8 +288,13 @@ class GameRules {
   /// Power a new player's starting territory begins with.
   static const double startingTroops = 10;
 
-  /// How long a player must wait between attacks (win or lose).
-  static const Duration attackCooldown = Duration(hours: 1);
+  /// Attack cooldown used when a world doesn't set its own.
+  static const Duration defaultAttackCooldown = Duration(hours: 1);
+
+  /// How long a player must wait between attacks (win or lose). Set per
+  /// world from the admin page (field `attackCooldownMinutes` on the world
+  /// document); the map screen keeps this up to date while a world is open.
+  static Duration attackCooldown = defaultAttackCooldown;
 
   /// Share of the troops each fighting province loses when an attack
   /// fails (the defence loses the same total amount).

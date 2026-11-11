@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/province.dart';
 import '../config/sea_links.dart';
 import '../services/border_finder.dart';
+import '../services/sfx.dart';
 import '../services/svg_map_parser.dart';
 
 /// Owns the parsed map data and the current selection.
@@ -115,6 +116,7 @@ class MapController extends ChangeNotifier {
 
     if (hit?.id == _selectedProvinceId) return; // nothing changed
     _selectedProvinceId = hit?.id;
+    if (hit != null) Sfx.play('country');
     notifyListeners();
   }
 

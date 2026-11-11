@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import '../config/dev_session.dart';
 import '../config/recent_worlds.dart';
 import '../config/saved_world.dart';
 import '../services/firestore_service.dart';
@@ -78,7 +78,7 @@ class _LoadingScreenState extends State<LoadingScreen>
     final id = widget.gameId;
     try {
       if (widget.validate) {
-        final uid = DevSession.uid;
+        final uid = FirebaseAuth.instance.currentUser!.uid;
         if (!await service.worldExists(id)) return false;
         if (!await service.playerExists(gameId: id, uid: uid)) return false;
         try {

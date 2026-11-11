@@ -528,7 +528,7 @@ class _IncomeScreenState extends State<IncomeScreen> {
 
   Widget _buildingRow(BuildingDef def, int owned) {
     final price = GameRules.buildCostFor(def, owned);
-    final detail = 'Owned $owned';
+    final detail = '$owned';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

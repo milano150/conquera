@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import '../config/dev_session.dart';
 import '../config/recent_worlds.dart';
 import '../screens/join_screen.dart';
 import '../screens/loading_screen.dart';
@@ -30,7 +30,7 @@ class WorldEntry {
     if (id.isEmpty) return 'Enter a world id.';
 
     try {
-      final uid = DevSession.uid;
+      final uid = FirebaseAuth.instance.currentUser!.uid;
 
       // Every server call gets a time limit, so a stalled connection ends
       // in an error message instead of an endless spinner.

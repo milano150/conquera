@@ -80,6 +80,9 @@ class _WorldSidebarState extends State<WorldSidebar>
   static const double _maxWidth = 280;
   static const double _maxBlur = 6;
 
+  /// Leftward distance dragged so far; a swipe left closes the sidebar.
+  double _dragX = 0;
+
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 260),
@@ -120,7 +123,16 @@ class _WorldSidebarState extends State<WorldSidebar>
         final t = _curve.value;
         final width = math.min(_maxWidth, MediaQuery.sizeOf(context).width * 0.8);
 
-        return Stack(
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onHorizontalDragStart: (_) => _dragX = 0,
+          onHorizontalDragUpdate: (d) => _dragX += d.delta.dx,
+          onHorizontalDragEnd: (d) {
+            final swipedLeft = _dragX < -48 || (d.primaryVelocity ?? 0) < -300;
+            _dragX = 0;
+            if (swipedLeft && widget.open) widget.onClose();
+          },
+          child: Stack(
           children: [
             // The world, blurred and dimmed a little.
             Positioned.fill(
@@ -161,6 +173,7 @@ class _WorldSidebarState extends State<WorldSidebar>
               ),
             ),
           ],
+        ),
         );
       },
     );

@@ -57,7 +57,7 @@ const BTYPES=['none',...Object.keys(BUILD)];
 const NAMES={"KP":"North Korea","KR":"South Korea","LA":"Laos","RU":"Russia","FO":"Faroe Islands","BQBO":"Bonaire","BQSA":"Saba","BQSE":"Sint Eustatius","BN":"Brunei","CZ":"Czechia","CI":"Ivory Coast","CD":"DR Congo","CG":"Congo","FM":"Micronesia","MK":"North Macedonia","SZ":"Eswatini","GM":"Gambia","ST":"São Tomé and Príncipe","RE":"Réunion","BL":"Saint Barthélemy","MF":"Saint Martin","VI":"US Virgin Islands","TL":"East Timor","CV":"Cape Verde"};
 let names; try{names=new Intl.DisplayNames(['en'],{type:'region'})}catch(e){}
 const nm=id=>{if(NAMES[id])return NAMES[id];try{return names?names.of(id.length>2?id.slice(0,2):id)||id:id}catch(e){return id}};
-let gid=null,players={},provs={},unsubs=[],tab='prov',sel=null,q='',ownerFilter='';
+let gid=null,world={},players={},provs={},unsubs=[],tab='prov',sel=null,q='',ownerFilter='';
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pname=p=>esc(p?.displayName||p?.id||'?');
@@ -72,8 +72,9 @@ firebase.auth().signInAnonymously().catch(e=>toast('Auth failed: '+e.message,tru
 
 async function connect(){
   const id=$('#world').value.trim(); if(!id)return;
-  unsubs.forEach(f=>f());unsubs=[];gid=id;players={};provs={};sel=null;
+  unsubs.forEach(f=>f());unsubs=[];gid=id;world={};players={};provs={};sel=null;
   unsubs.push(P().onSnapshot(s=>{players={};s.forEach(d=>players[d.id]={id:d.id,...d.data()});render()},e=>toast(e.message,true)));
+  unsubs.push(gref().onSnapshot(s=>{world=s.data()||{};render()},e=>toast(e.message,true)));
   unsubs.push(V().onSnapshot(s=>{provs={};s.forEach(d=>provs[d.id]={id:d.id,...d.data()});render()},e=>toast(e.message,true)));
   $('#status').textContent='Connected: '+id;
 }
@@ -102,6 +103,7 @@ async function recalcAll(){const b=db.batch();Object.keys(players).forEach(u=>ap
 function render(){
   const bar=$('#bar'),body=$('#body');
   if(!gid){bar.innerHTML='';body.innerHTML='<div class="mut">Enter a world id and press Go.</div>';return}
+  if(tab==='tools'&&bar.dataset.tab==='tools'&&document.querySelector('#body input:focus'))return; // don't wipe a value being typed
   if(tab==='prov'&&$('#grid')&&bar.dataset.tab==='prov'){ // live refresh: keep focus & drawer edits
     const o=$('#of');if(o){const cur=ownerFilter;o.innerHTML=ownerOpts();o.value=cur}
     $('#cnt').textContent=Object.keys(provs).length+'/'+IDS.length+' owned';drawGrid();
@@ -230,12 +232,17 @@ window.recalcOne=wrap(async uid=>{const b=db.batch();applyRecalc(b,uid,provs);aw
 window.delPlayer=wrap(async uid=>{if(!confirm('Delete this player and make their provinces neutral?'))return;const b=db.batch();Object.values(provs).filter(p=>p.ownerId===uid).forEach(p=>b.delete(V().doc(p.id)));b.delete(P().doc(uid));await b.commit();toast('Player deleted')});
 function renderTools(bar,body){
   bar.innerHTML='<b>Tools</b>';
-  body.innerHTML=`<div><div class="card"><b>Give gold to everyone</b><div class="row" style="margin-top:8px"><input id="gg" type="number" value="100"><button class="p" onclick="giveAll()">Give</button></div></div>
+  const cdSet=typeof world.attackCooldownMinutes==='number'&&world.attackCooldownMinutes>=0,cdMin=cdSet?world.attackCooldownMinutes:DEFAULT_CD_MIN;
+  body.innerHTML=`<div><div class="card"><b>Attack cooldown</b><p class="mut">How long a player waits between attacks in this world. Applies live to everyone. 0 = no cooldown. Now: ${cdMin} min${cdSet?'':' (default, not set for this world)'}.</p><div class="row"><input id="cdm" type="number" min="0" step="any" value="${cdMin}" style="width:110px"><span class="mut">minutes</span><button class="p" onclick="setCd()">Save</button><button onclick="clearCd()">Use default (${DEFAULT_CD_MIN})</button></div></div>
+  <div class="card"><b>Give gold to everyone</b><div class="row" style="margin-top:8px"><input id="gg" type="number" value="100"><button class="p" onclick="giveAll()">Give</button></div></div>
   <div class="card"><b>Reset everyone's cooldowns</b><p class="mut">Clears attack and build-after-destroy cooldowns, and makes every insurgent's overthrow available right away.</p><button class="p" onclick="resetAllCd()">Reset all</button></div>
   <div class="card"><b>Download backup</b><p class="mut">Saves players and provinces of this world as JSON. Do this before wiping.</p><button class="p" onclick="backup()">Download JSON</button></div>
   <div class="card"><b>Recalculate all players</b><p class="mut">Fixes land count, building income and gold rate from the actual provinces.</p><button class="p" onclick="recalcAll().catch(e=>toast(e.message,true))">Recalculate</button></div>
   <div class="card"><b>Neutralize ALL provinces</b><p class="mut">Deletes every province doc. Players stay but own nothing.</p><button class="d" onclick="wipe()">Wipe map…</button></div></div>`;
 }
+const DEFAULT_CD_MIN=60; // keep in sync with GameRules.defaultAttackCooldown in the app
+window.setCd=wrap(async()=>{const raw=$('#cdm').value.trim(),v=Number(raw);if(raw===''||!isFinite(v)||v<0)return toast('Enter minutes (0 or more)',true);await gref().set({attackCooldownMinutes:v},{merge:true});toast('Attack cooldown set to '+v+' min')});
+window.clearCd=wrap(async()=>{await gref().set({attackCooldownMinutes:firebase.firestore.FieldValue.delete()},{merge:true});toast('Back to the default cooldown')});
 window.resetAllCd=wrap(async()=>{const D=firebase.firestore.FieldValue.delete();const b=db.batch();Object.keys(players).forEach(u=>{const x={lastAttackAt:D,lastDestroyAt:D};if(players[u]?.insurgentIn)x.insurgentSince=readyTs();b.update(P().doc(u),x)});Object.values(provs).filter(p=>p.building&&p.building.lastUsedAt).forEach(p=>b.update(V().doc(p.id),{'building.lastUsedAt':D}));await b.commit();toast('Cooldowns reset for everyone')});
 window.backup=wrap(async()=>{const ser=o=>JSON.parse(JSON.stringify(o,(k,v)=>v&&typeof v.toDate==='function'?{__ts:v.toDate().toISOString()}:v));
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({world:gid,at:new Date().toISOString(),players:ser(players),provinces:ser(provs)},null,1)],{type:'application/json'}));a.download=`conquera-${gid}-${Date.now()}.json`;a.click();toast('Backup downloaded')});

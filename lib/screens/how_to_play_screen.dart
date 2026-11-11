@@ -7,7 +7,8 @@ import '../theme/conquera_theme.dart';
 class HowToPlayScreen extends StatelessWidget {
   const HowToPlayScreen({super.key});
 
-  static final List<(String, String)> _sections = [
+  // A getter, not a final: the attack cooldown differs per world.
+  static List<(String, String)> get _sections => [
     (
       'Your first territory',
       'When you join a world, the game picks a free country at random and '
@@ -49,9 +50,8 @@ class HowToPlayScreen extends StatelessWidget {
           'territory becomes yours. If you fail, both sides lose troops: '
           'each fighting province loses '
           '${(GameRules.failedAttackLossShare * 100).round()}% of its '
-          'power, and the defence loses the same total amount. After any '
-          'attack you must wait ${GameRules.attackCooldown.inMinutes} '
-          'minutes before the next one.',
+          'power, and the defence loses the same total amount. '
+          '${_attackCooldownSentence(GameRules.attackCooldown)}',
     ),
     (
       'Buildings',
@@ -130,4 +130,19 @@ class HowToPlayScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The cooldown rule as a sentence. Worlds set their own cooldown, so the
+/// text follows it (0 = no cooldown).
+String _attackCooldownSentence(Duration d) {
+  if (d <= Duration.zero) return 'There is no cooldown between attacks.';
+  final String wait;
+  if (d.inSeconds < 60) {
+    wait = '${d.inSeconds} seconds';
+  } else if (d.inMinutes == 1) {
+    wait = '1 minute';
+  } else {
+    wait = '${d.inMinutes} minutes';
+  }
+  return 'After any attack you must wait $wait before the next one.';
 }

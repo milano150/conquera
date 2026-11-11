@@ -170,16 +170,15 @@ class FirestoreService {
         );
   }
 
-  /// One-shot list of every player in the game, sorted by name. BETA: feeds
-  /// the "log in as any player" picker on the home screen.
-  Future<List<PlayerState>> listPlayers({required String gameId}) async {
-    final snap = await _gameRef(gameId).collection('players').get();
-    final players = [for (final d in snap.docs) PlayerState.fromDoc(d)];
-    players.sort(
-      (a, b) =>
-          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
-    );
-    return players;
+  /// The world's attack cooldown, live. Emits null when the world doesn't
+  /// set one (the caller then uses [GameRules.defaultAttackCooldown]).
+  /// The admin page writes `attackCooldownMinutes` (0 = no cooldown).
+  Stream<Duration?> watchAttackCooldown({required String gameId}) {
+    return _gameRef(gameId).snapshots().map((snap) {
+      final minutes = snap.data()?['attackCooldownMinutes'];
+      if (minutes is! num || minutes < 0) return null;
+      return Duration(milliseconds: (minutes * 60000).round());
+    });
   }
 
   // ---------------------------------------------------------------------

@@ -5,8 +5,9 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import '../config/dev_session.dart';
+import '../services/sfx.dart';
 import '../config/saved_world.dart';
 import '../config/game_rules.dart';
 import '../config/territory_types.dart';
@@ -129,13 +130,14 @@ class _MapScreenState extends State<MapScreen>
   // Live game data. Notifiers (instead of plain fields) so the province
   // window can listen to the same data without opening its own streams.
   final FirestoreService _firestore = FirestoreService();
-  late final String _uid = DevSession.uid;
+  late final String _uid = FirebaseAuth.instance.currentUser!.uid;
   late final NotificationsController _notifs =
       NotificationsController(gameId: widget.gameId, uid: _uid);
   StreamSubscription<Map<String, ProvinceState>>? _provincesSub;
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
   StreamSubscription<MissileEvent>? _missilesSub;
+  StreamSubscription<Duration?>? _cooldownSub;
 
   // --- Log notification badge --------------------------------------------
   StreamSubscription<List<LogEntry>>? _logSub;
@@ -437,6 +439,13 @@ class _MapScreenState extends State<MapScreen>
       _onMissileEvent,
       onError: (Object e) => debugPrint('Missile events stream error: $e'),
     );
+    _cooldownSub = _firestore.watchAttackCooldown(gameId: widget.gameId).listen(
+      (cooldown) {
+        GameRules.attackCooldown = cooldown ?? GameRules.defaultAttackCooldown;
+        if (mounted) setState(() {});
+      },
+      onError: (Object e) => debugPrint('Attack cooldown stream error: $e'),
+    );
     _logSub = _firestore.watchLog(gameId: widget.gameId).listen(
       (list) {
         _logEntries = list;
@@ -456,6 +465,8 @@ class _MapScreenState extends State<MapScreen>
     _eventsSub?.cancel();
     _missilesSub?.cancel();
     _logSub?.cancel();
+    _cooldownSub?.cancel();
+    GameRules.attackCooldown = GameRules.defaultAttackCooldown;
     for (final t in _graceTimers.values) {
       t.cancel();
     }
@@ -1204,6 +1215,7 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
 
+    Sfx.play('claim');
     setState(() {
       _battle = _battleView(
         target: target,
@@ -1497,6 +1509,8 @@ class _MapScreenState extends State<MapScreen>
         : result.fighterIds.toSet();
 
     final defenders = result.defenderSupportIds.toSet();
+
+    Sfx.play(result.won ? 'claim' : 'buzz');
 
     if (result.won) {
       setState(() {

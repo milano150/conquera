@@ -9,6 +9,7 @@ import '../models/player_state.dart';
 import '../models/province_state.dart';
 import '../services/firestore_service.dart';
 import '../services/server_clock.dart';
+import '../services/sfx.dart';
 import '../theme/conquera_theme.dart';
 import 'gold_amount.dart';
 import 'player_tag.dart';
@@ -115,7 +116,11 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     return '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
   }
 
-  Future<void> _run(Future<void> Function() action, String success) async {
+  Future<void> _run(
+    Future<void> Function() action,
+    String success, {
+    String? sound,
+  }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -123,6 +128,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     });
     try {
       await action();
+      if (sound != null) Sfx.play(sound);
       if (!mounted) return;
       setState(() {
         _message = success;
@@ -190,6 +196,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
           building: building,
         ),
         'Built ${building.name}.',
+        sound: 'construct',
       ).then((_) {
         // Done: back to the map (the Build button disappears there).
         if (mounted && !_isError) Navigator.of(context).pop();
@@ -204,6 +211,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         neighborIds: widget.neighborIds,
       ),
       'Built ${building.name}.',
+      sound: 'construct',
     );
   }
 
@@ -227,14 +235,14 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
-          OutlinedButton(
+          SfxSilent(child: OutlinedButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: OutlinedButton.styleFrom(
               foregroundColor: ConqueraColors.danger,
               side: BorderSide(color: ConqueraColors.danger),
             ),
             child: const Text('Destroy'),
-          ),
+          )),
         ],
       ),
     );
@@ -247,7 +255,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         uid: widget.uid,
       );
       if (mounted) setState(() => _pendingBuilding = null);
-    }, '$label destroyed.');
+    }, '$label destroyed.', sound: 'break');
   }
 
   Future<void> _recruitNavy(int power) {
@@ -266,7 +274,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         unit: unit,
       );
       if (mounted) setState(() => _navyPower = 1);
-    }, '+$power navy added.');
+    }, '+$power navy added.', sound: 'reinforce');
   }
 
   Future<void> _recruit(int power) {
@@ -285,7 +293,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         unit: unit,
       );
       if (mounted) setState(() => _power = 1);
-    }, '+$power power added.');
+    }, '+$power power added.', sound: 'reinforce');
   }
 
   @override
@@ -476,7 +484,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                   _ActionRow(
                     info: def?.effectLabelFor(_partnersFor(def), widget.provinceId) ?? '',
                     unaffordable: false,
-                    button: OutlinedButton(
+                    button: SfxSilent(child: OutlinedButton(
                       onPressed:
                           _busy ? null : () => _destroy(province.buildingLabel),
                       style: OutlinedButton.styleFrom(
@@ -488,7 +496,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                         ),
                       ),
                       child: const Text('Destroy'),
-                    ),
+                    )),
                   ),
                 ],
               ),
@@ -530,10 +538,10 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
                       ? (cooling ? 'Cooling down' : '')
                       : pending.effectLabelFor(_partnersFor(pending), widget.provinceId),
                   unaffordable: unaffordable,
-                  button: FilledButton(
+                  button: SfxSilent(child: FilledButton(
                     onPressed: canBuild ? _build : null,
                     child: Text(cooling ? 'Build ${_clock(cooldownLeft)}' : 'Build'),
-                  ),
+                  )),
                 ),
               ],
             ),
@@ -580,10 +588,10 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
       _ActionRow(
         info: '',
         unaffordable: maxLand < 1,
-        button: FilledButton(
+        button: SfxSilent(child: FilledButton(
           onPressed: power >= 1 && !_busy ? () => _recruit(power) : null,
           child: const Text('Reinforce'),
-        ),
+        )),
       ),
       // A naval base also holds a navy (blue), bought separately.
       if (navy != null) ...[
@@ -617,7 +625,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         _ActionRow(
           info: navyRoom < 1 ? 'Navy is full' : '',
           unaffordable: navyRoom >= 1 && maxNavy < 1,
-          button: OutlinedButton(
+          button: SfxSilent(child: OutlinedButton(
             onPressed:
                 navyPower >= 1 && !_busy ? () => _recruitNavy(navyPower) : null,
             style: OutlinedButton.styleFrom(
@@ -629,7 +637,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               ),
             ),
             child: const Text('Add navy'),
-          ),
+          )),
         ),
       ],
     ];
@@ -1289,7 +1297,7 @@ class _BuildingTile extends StatelessWidget {
           top: 9,
           right: 8,
           child: Text(
-            'Owned $owned',
+            '$owned',
             style: ConqueraText.label.copyWith(
               fontSize: 11,
               fontWeight: owned > 0 ? FontWeight.w700 : FontWeight.w400,
