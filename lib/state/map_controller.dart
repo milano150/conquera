@@ -36,30 +36,52 @@ class MapController extends ChangeNotifier {
   Province? get selectedProvince =>
       _selectedProvinceId == null ? null : _provinceLookup[_selectedProvinceId];
 
+  /// Neighbors and tap targets per map asset, computed once. The loading
+  /// screen fills this so the map screen's own load is instant.
+  static final Map<String,
+          (Map<String, Set<String>>, Map<String, _TapTarget>)> _prepared = {};
+
+  /// Does the heavy map work ahead of time (see [_prepared]).
+  static Future<void> preload(String assetPath) async {
+    final c = MapController();
+    await c.loadMap(assetPath);
+    c.dispose();
+  }
+
   /// Parses the SVG at [assetPath] and populates [provinces].
   Future<void> loadMap(String assetPath) async {
     try {
       final result = await SvgMapParser.parseAsset(assetPath);
       _provinces = result.provinces;
       _provinceLookup = {for (final p in _provinces) p.id: p};
-      _buildTapTargets();
       _mapSize = result.size;
-      final neighbors = <String, Set<String>>{
-        for (final e in BorderFinder.find(_provinces, _mapSize).entries)
-          e.key: {...e.value},
-      };
-      for (final link in seaLinks) {
-        final a = link.$1;
-        final b = link.$2;
-        if (!_provinceLookup.containsKey(a) ||
-            !_provinceLookup.containsKey(b)) {
-          debugPrint('Sea link skipped (not on the map): $a - $b');
-          continue;
+
+      final prepared = _prepared[assetPath];
+      if (prepared != null) {
+        _neighbors = prepared.$1;
+        _tapTargets
+          ..clear()
+          ..addAll(prepared.$2);
+      } else {
+        _buildTapTargets();
+        final neighbors = <String, Set<String>>{
+          for (final e in BorderFinder.find(_provinces, _mapSize).entries)
+            e.key: {...e.value},
+        };
+        for (final link in seaLinks) {
+          final a = link.$1;
+          final b = link.$2;
+          if (!_provinceLookup.containsKey(a) ||
+              !_provinceLookup.containsKey(b)) {
+            debugPrint('Sea link skipped (not on the map): $a - $b');
+            continue;
+          }
+          (neighbors[a] ??= <String>{}).add(b);
+          (neighbors[b] ??= <String>{}).add(a);
         }
-        (neighbors[a] ??= <String>{}).add(b);
-        (neighbors[b] ??= <String>{}).add(a);
+        _neighbors = neighbors;
+        _prepared[assetPath] = (neighbors, Map.of(_tapTargets));
       }
-      _neighbors = neighbors;
       _isLoaded = true;
       _loadError = null;
     } catch (error, stackTrace) {

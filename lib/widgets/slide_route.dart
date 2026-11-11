@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 
-/// Screen transition for moving through the menus: the new screen slides in
-/// from the right while the old one drifts a little to the left; popping
-/// plays it backwards (the screen slides out to the right).
+/// Screen transition for moving through the menus, the same slide as the
+/// home screen's Play button: the new screen slides in from the right while
+/// the old one slides out to the left, as one piece. Popping plays it
+/// backwards.
 class SlideRoute<T> extends PageRouteBuilder<T> {
   SlideRoute({required WidgetBuilder builder, super.settings})
       : super(
           pageBuilder: (context, animation, secondaryAnimation) =>
               builder(context),
           transitionDuration: const Duration(milliseconds: 380),
-          reverseTransitionDuration: const Duration(milliseconds: 320),
+          reverseTransitionDuration: const Duration(milliseconds: 380),
           transitionsBuilder: _transition,
         );
 
@@ -21,33 +22,24 @@ class SlideRoute<T> extends PageRouteBuilder<T> {
   ) {
     final enter = CurvedAnimation(
       parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      curve: Curves.easeInOutCubic,
     );
     final leave = CurvedAnimation(
       parent: secondaryAnimation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      curve: Curves.easeInOutCubic,
     );
     return SlideTransition(
-      // When another screen is pushed on top, this one drifts left.
+      // When another screen is pushed on top, this one slides fully left.
       position: Tween<Offset>(
         begin: Offset.zero,
-        end: const Offset(-0.25, 0),
+        end: const Offset(-1, 0),
       ).animate(leave),
       child: SlideTransition(
         position: Tween<Offset>(
           begin: const Offset(1, 0),
           end: Offset.zero,
         ).animate(enter),
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            boxShadow: [
-              BoxShadow(color: Color(0x1A000000), blurRadius: 18),
-            ],
-          ),
-          child: child,
-        ),
+        child: child,
       ),
     );
   }

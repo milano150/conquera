@@ -8,11 +8,14 @@ import '../models/player_state.dart';
 import '../models/province_state.dart';
 import '../services/firestore_service.dart';
 import '../config/saved_world.dart';
+import '../screens/loading_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/trade_screen.dart';
 import '../theme/conquera_theme.dart';
+import 'fade_route.dart';
 import 'feed_panels.dart';
 import 'leaderboard_panel.dart';
+import 'light_screens_observer.dart';
 
 /// Slide-in menu that covers the left of the screen while the rest of the
 /// screen (the world) blurs behind it. Put it on top of everything in a
@@ -310,10 +313,17 @@ class _PanelState extends State<_Panel> {
         Padding(
           padding: const EdgeInsets.all(ConqueraSpace.md),
           child: OutlinedButton(
-            // Back to the home screen (first route in the stack).
+            // Replace the whole stack: loading screen, then a fresh home
+            // (PLAY) screen.
             onPressed: () {
               SavedWorld.clear(); // don't reopen this world on next launch
-              Navigator.of(context).popUntil((r) => r.isFirst);
+              Navigator.of(context).pushAndRemoveUntil(
+                FadeRoute<void>(
+                  settings: const RouteSettings(name: kLightRouteName),
+                  builder: (_) => const LoadingScreen.toHome(),
+                ),
+                (route) => false,
+              );
             },
             style: OutlinedButton.styleFrom(
               foregroundColor: ConqueraColors.danger,

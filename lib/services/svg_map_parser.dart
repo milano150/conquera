@@ -88,9 +88,21 @@ class SvgMapParser {
 
   /// Loads [assetPath] from the asset bundle and parses it.
   static Future<MapParseResult> parseAsset(String assetPath) async {
-    final raw = await rootBundle.loadString(assetPath);
-    return parseString(raw);
+    final cached = _assetCache[assetPath];
+    if (cached != null) return cached;
+    final future = rootBundle.loadString(assetPath).then(parseString);
+    _assetCache[assetPath] = future;
+    try {
+      return await future;
+    } catch (_) {
+      _assetCache.remove(assetPath); // let a later call retry
+      rethrow;
+    }
   }
+
+  /// The parsed map is read-only, so the join screen and the map screen
+  /// share one parse instead of each doing the heavy work.
+  static final Map<String, Future<MapParseResult>> _assetCache = {};
 
   /// Parses raw SVG markup into a [MapParseResult].
   static MapParseResult parseString(String svgSource) {

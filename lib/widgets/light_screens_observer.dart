@@ -27,11 +27,11 @@ class LightScreensObserver extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _sync(route, _isLight(route) ? Duration.zero : const Duration(milliseconds: 350));
+      _sync(route, const Duration(milliseconds: 350));
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
-      _sync(newRoute, _isLight(newRoute) ? Duration.zero : const Duration(milliseconds: 350));
+      _sync(newRoute, const Duration(milliseconds: 350));
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>

@@ -34,3 +34,4 @@ flutter:
   assets:
     - assets/maps/world.svg
     - assets/icons/
+    - assets/images/

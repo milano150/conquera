@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../config/dev_session.dart';
 import '../config/recent_worlds.dart';
 import '../screens/join_screen.dart';
-import '../screens/map_screen.dart';
+import '../screens/loading_screen.dart';
 import '../widgets/fade_route.dart';
 import '../widgets/light_screens_observer.dart';
 import '../widgets/slide_route.dart';
@@ -15,35 +17,54 @@ import 'firestore_service.dart';
 class WorldEntry {
   const WorldEntry._();
 
-  /// Returns an error message to show, or null when the world was opened
-  /// (and closed again).
+  /// Returns an error message to show, or null when the world was opened.
+  /// [onOpening] runs just before the next screen is pushed (the join dialog
+  /// uses it to close itself first, so the home screen is what slides).
   static Future<String?> enter(
     BuildContext context,
     FirestoreService service,
-    String worldId,
-  ) async {
+    String worldId, {
+    VoidCallback? onOpening,
+  }) async {
     final id = worldId.trim();
     if (id.isEmpty) return 'Enter a world id.';
 
     try {
       final uid = DevSession.uid;
 
-      if (!await service.worldExists(id)) return 'No world with that id.';
+      // Every server call gets a time limit, so a stalled connection ends
+      // in an error message instead of an endless spinner.
+      const limit = Duration(seconds: 15);
 
-      final joined = await service.playerExists(gameId: id, uid: uid);
+      debugPrint('[enter] checking world $id');
+      if (!await service.worldExists(id).timeout(limit)) {
+        return 'No world with that id.';
+      }
+
+      debugPrint('[enter] checking player');
+      final joined =
+          await service.playerExists(gameId: id, uid: uid).timeout(limit);
       if (joined) {
         try {
-          await service.reconcileIncome(gameId: id, uid: uid);
+          debugPrint('[enter] reconciling income');
+          await service.reconcileIncome(gameId: id, uid: uid).timeout(limit);
         } catch (e) {
           debugPrint('Income reconcile failed: $e');
         }
         await RecentWorlds.add(id);
       }
       if (!context.mounted) return null;
+      debugPrint('[enter] opening ${joined ? 'loading screen' : 'join screen'}');
 
-      await Navigator.of(context).push(
+      final navigator = Navigator.of(context);
+      onOpening?.call();
+      await navigator.push(
         joined
-            ? FadeRoute<void>(builder: (_) => MapScreen(gameId: id))
+            ? FadeRoute<void>(
+                // The loading screen always stays light.
+                settings: const RouteSettings(name: kLightRouteName),
+                builder: (_) => LoadingScreen(gameId: id),
+              )
             : SlideRoute<void>(
                 // The join screen always stays light.
                 settings: const RouteSettings(name: kLightRouteName),
@@ -51,6 +72,9 @@ class WorldEntry {
               ),
       );
       return null;
+    } on TimeoutException {
+      debugPrint('Entering world timed out (see the last [enter] line above)');
+      return 'The server is not responding.';
     } catch (e) {
       debugPrint('Entering world failed: $e');
       return 'Could not reach the server.';

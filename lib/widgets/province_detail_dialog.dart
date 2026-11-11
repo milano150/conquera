@@ -625,7 +625,9 @@ class _AmountSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = max >= 1 && onChanged != null;
-    final accent = enabled ? color : ConqueraColors.muted.withAlpha(120);
+    // Neutral ink (no blue tint) for the readout, track and thumb.
+    final accent =
+        enabled ? ConqueraColors.ink : ConqueraColors.muted.withAlpha(120);
     final readout = ConqueraText.figure.copyWith(
       fontSize: 26,
       color: accent,
@@ -680,7 +682,7 @@ class _AmountSlider extends StatelessWidget {
                     disabledActiveTrackColor: accent,
                     disabledInactiveTrackColor:
                         ConqueraColors.divider.withAlpha(70),
-                    overlayColor: color.withAlpha(36),
+                    overlayColor: ConqueraColors.ink.withAlpha(36),
                     overlayShape:
                         const RoundSliderOverlayShape(overlayRadius: 20),
                     tickMarkShape: SliderTickMarkShape.noTickMark,
@@ -753,11 +755,8 @@ class _StepButton extends StatelessWidget {
             ? Icon(icon, size: 16, color: c)
             : Text(
                 label!,
-                style: ConqueraText.label.copyWith(
-                  color: c,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.8,
-                ),
+                // Same type as the Reinforce / Destroy buttons.
+                style: ConqueraText.button.copyWith(color: c),
               ),
       ),
     );

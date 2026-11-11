@@ -221,7 +221,7 @@ class GameRules {
 
   /// Gold price of claiming a bordering unclaimed province. Claiming does
   /// not start (or wait for) the attack cooldown.
-  static const int claimCost = 40;
+  static const int claimCost = 20;
 
   /// Claim price grows with the territories you already own:
   /// claimCost + claimCostPerTerritory per extra territory, up to claimCostMax.
@@ -262,7 +262,7 @@ class GameRules {
 
   /// Gold a player starts with when joining a world: enough for a squad, a
   /// first claim, and a mine or two.
-  static const int startingGold = 100;
+  static const int startingGold = 150;
 
   /// Power a new player's starting territory begins with.
   static const double startingTroops = 10;
@@ -289,13 +289,13 @@ class GameRules {
       canAct(troops) && !(buildingById(buildingType)?.blocksAttacks ?? false);
 
   /// Taxes: every territory a player owns earns this much gold per second.
-  static const double goldPerTerritoryPerSec = 0.0001;
+  static const double goldPerTerritoryPerSec = 0.0003;
 
   static const BuildingDef goldMine = BuildingDef(
     id: 'gold_mine',
     name: 'Gold mine',
     icon: Icons.factory,
-    cost: 70,
+    cost: 50,
     goldPerSec: 0.0004,
     details: 'Produces gold for you around the clock. Can be built in any '
         'territory; gold-rich territories pay more.',

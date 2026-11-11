@@ -2531,6 +2531,11 @@ class _MapScreenState extends State<MapScreen>
                                 onClaim: () => _claim(selected),
                                 claimPrice:
                                     GameRules.claimCostFor(_ownedTerritories),
+                                claimAffordable: () =>
+                                    (_players.value[_uid]
+                                            ?.goldAt(ServerClock.now()) ??
+                                        0) >=
+                                    GameRules.claimCostFor(_ownedTerritories),
                                 useIcon: selectedState?.ownerId == _uid
                                     ? GameRules.buildingById(
                                         selectedState!.buildingType,

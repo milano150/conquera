@@ -47,6 +47,11 @@ class CountryInfoPanel extends StatelessWidget {
   /// What claiming this territory costs the player right now.
   final int claimPrice;
 
+  /// Whether the player has enough gold to claim right now (null = always).
+  /// A function because gold keeps growing: the button re-checks it every
+  /// second and turns active as soon as the player can pay.
+  final bool Function()? claimAffordable;
+
   /// Icon of the USE button beside Manage (a missile silo's launch).
   /// Null = no button.
   final IconData? useIcon;
@@ -78,6 +83,7 @@ class CountryInfoPanel extends StatelessWidget {
     required this.onOpenDetails,
     this.isEnemy = false,
     this.isUnclaimed = false,
+    this.claimAffordable,
     this.canAttack = false,
     this.canSplit = true,
     this.attackReadyAt,
@@ -170,7 +176,7 @@ class CountryInfoPanel extends StatelessWidget {
                       color: ConqueraColors.danger,
                       enabled: canAttack && canSplit,
                       readyAt: attackReadyAt,
-                      hint: canAttack ? null : 'Not bordering your land',
+                      hint: null,
                       onPressed: onAttack,
                     )
                   else if (isUnclaimed)
@@ -181,6 +187,7 @@ class CountryInfoPanel extends StatelessWidget {
                         _ActionButton(
                           label: 'Claim',
                           price: claimPrice,
+                          affordable: claimAffordable,
                           color: ConqueraColors.accent,
                           enabled: canSplit,
                           readyAt: null, // claiming has no cooldown
@@ -225,6 +232,10 @@ class _ActionButton extends StatefulWidget {
 
   /// Gold price shown after the label (Claim); null for none.
   final int? price;
+
+  /// Extra gate: false (e.g. not enough gold) greys the button out. Checked
+  /// again every second while false.
+  final bool Function()? affordable;
   final Color color;
   final bool enabled;
   final DateTime? readyAt;
@@ -239,6 +250,7 @@ class _ActionButton extends StatefulWidget {
     required this.hint,
     required this.onPressed,
     this.price,
+    this.affordable,
   });
 
   @override
@@ -247,23 +259,41 @@ class _ActionButton extends StatefulWidget {
 
 class _ActionButtonState extends State<_ActionButton> {
   Timer? _ticker;
+  Timer? _goldTicker;
 
   @override
   void initState() {
     super.initState();
     _syncTicker();
+    _syncGoldTicker();
   }
 
   @override
   void didUpdateWidget(covariant _ActionButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.readyAt != widget.readyAt) _syncTicker();
+    _syncGoldTicker();
   }
 
   @override
   void dispose() {
     _ticker?.cancel();
+    _goldTicker?.cancel();
     super.dispose();
+  }
+
+  /// While the player can't afford the action, re-check every second so the
+  /// button lights up the moment enough gold has come in.
+  void _syncGoldTicker() {
+    _goldTicker?.cancel();
+    _goldTicker = null;
+    final affordable = widget.affordable;
+    if (affordable == null || affordable()) return;
+    _goldTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() {});
+      if (affordable()) timer.cancel();
+    });
   }
 
   Duration _left() {
@@ -294,7 +324,8 @@ class _ActionButtonState extends State<_ActionButton> {
     final left = _left();
     final cooling = left > Duration.zero;
     final hint = widget.hint;
-    final active = widget.enabled && !cooling;
+    final canPay = widget.affordable?.call() ?? true;
+    final active = widget.enabled && !cooling && canPay;
     final price = widget.price;
 
     return Column(

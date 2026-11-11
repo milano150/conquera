@@ -15,6 +15,8 @@ import '../theme/conquera_theme.dart';
 import '../widgets/fade_route.dart';
 import '../widgets/conquera_text_field.dart';
 import '../widgets/player_tag.dart';
+import '../widgets/light_screens_observer.dart';
+import 'loading_screen.dart';
 import 'map_screen.dart';
 
 /// Second screen, for a player's first visit to a world: pick a name and a
@@ -49,6 +51,11 @@ class _JoinScreenState extends State<JoinScreen> {
   @override
   void initState() {
     super.initState();
+    // Start parsing the map now so joining and opening the map are quick.
+    SvgMapParser.parseAsset(MapScreen.defaultAssetPath).then(
+      (_) {},
+      onError: (Object e) => debugPrint('Map preload failed: $e'),
+    );
     _playersSub = _service.watchPlayers(gameId: widget.gameId).listen(
       (players) {
         if (!mounted) return;
@@ -106,21 +113,28 @@ class _JoinScreenState extends State<JoinScreen> {
 
     try {
       final uid = DevSession.uid;
+      debugPrint('[join] parsing map');
       final map = await SvgMapParser.parseAsset(MapScreen.defaultAssetPath);
 
-      final spawn = await _service.joinWorld(
-        gameId: widget.gameId,
-        uid: uid,
-        displayName: _name.text.trim(),
-        colorHex: _colorHex!,
-        spawnCandidates: _spawnCandidates(map.provinces),
-      );
+      debugPrint('[join] joining world');
+      final spawn = await _service
+          .joinWorld(
+            gameId: widget.gameId,
+            uid: uid,
+            displayName: _name.text.trim(),
+            colorHex: _colorHex!,
+            spawnCandidates: _spawnCandidates(map.provinces),
+          )
+          .timeout(const Duration(seconds: 20));
+      debugPrint('[join] joined, opening loading screen');
       await RecentWorlds.add(widget.gameId);
       if (!mounted) return;
 
       await Navigator.of(context).pushReplacement(
         FadeRoute<void>(
-          builder: (_) => MapScreen(
+          // The loading screen always stays light.
+          settings: const RouteSettings(name: kLightRouteName),
+          builder: (_) => LoadingScreen(
             gameId: widget.gameId,
             focusProvinceId: spawn,
           ),
@@ -128,6 +142,9 @@ class _JoinScreenState extends State<JoinScreen> {
       );
     } on GameActionException catch (e) {
       if (mounted) setState(() => _error = e.message);
+    } on TimeoutException {
+      debugPrint('Joining timed out (see the last [join] line above)');
+      if (mounted) setState(() => _error = 'The server is not responding.');
     } catch (e) {
       debugPrint('Joining world failed: $e');
       if (mounted) setState(() => _error = 'Could not join the world.');

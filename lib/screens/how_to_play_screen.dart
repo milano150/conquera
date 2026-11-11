@@ -61,9 +61,7 @@ class HowToPlayScreen extends StatelessWidget {
           'territory you also own. Barracks lend their power to attacks '
           'launched from bordering territories of yours, a watchtower shows '
           'the buildings and power of bordering territories, and a radar '
-          'shows everything inside its range. If you '
-          'destroy a building, you cannot build anything for '
-          '${GameRules.buildCooldownAfterDestroy.inMinutes} minutes.',
+          'shows everything inside its range.',
     ),
     (
       'Defending',

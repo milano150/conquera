@@ -15,7 +15,14 @@ class HomeScreen extends StatefulWidget {
   /// A world to open right away (the one saved from the last session).
   final String? autoEnterWorldId;
 
-  const HomeScreen({super.key, this.autoEnterWorldId});
+  /// Open with the worlds panel already showing (used by "Back to lobby").
+  final bool startOnWorlds;
+
+  const HomeScreen({
+    super.key,
+    this.autoEnterWorldId,
+    this.startOnWorlds = false,
+  });
 
   /// Shown under BETA.
   static const String version = '1.1';
@@ -45,6 +52,10 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _creatorTap.onTap = _openCreator;
+    if (widget.startOnWorlds) {
+      _worldsShown = true;
+      _ctrl.value = 1;
+    }
     final saved = widget.autoEnterWorldId;
     if (saved != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _autoEnter(saved));

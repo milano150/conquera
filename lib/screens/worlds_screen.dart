@@ -131,8 +131,10 @@ class _WorldsPanelState extends State<WorldsPanel> {
                         ),
                         child: const Text('Join with ID'),
                       ),
-                      const SizedBox(height: ConqueraSpace.md),
-                      Flexible(child: _worldsBox()),
+                      if (_ids == null || _ids!.isNotEmpty) ...[
+                        const SizedBox(height: ConqueraSpace.md),
+                        Flexible(child: _worldsBox()),
+                      ],
                       SizedBox(
                         height: 28,
                         child: _error == null
@@ -183,27 +185,18 @@ class _WorldsPanelState extends State<WorldsPanel> {
       clipBehavior: Clip.antiAlias,
       child: ids == null
           ? const SizedBox(height: 64)
-          : ids.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 22),
-                  child: Text(
-                    'No worlds yet',
-                    textAlign: TextAlign.center,
-                    style: ConqueraText.label.copyWith(fontSize: 14),
-                  ),
-                )
-              : ListView.separated(
-                  shrinkWrap: true,
-                  padding: EdgeInsets.zero,
-                  itemCount: ids.length,
-                  separatorBuilder: (_, __) => Divider(
-                    height: 1,
-                    indent: ConqueraSpace.md,
-                    endIndent: ConqueraSpace.md,
-                    color: ConqueraColors.divider.withAlpha(70),
-                  ),
-                  itemBuilder: (_, i) => _row(ids[i]),
-                ),
+          : ListView.separated(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              itemCount: ids.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                indent: ConqueraSpace.md,
+                endIndent: ConqueraSpace.md,
+                color: ConqueraColors.divider.withAlpha(70),
+              ),
+              itemBuilder: (_, i) => _row(ids[i]),
+            ),
     );
   }
 
@@ -338,11 +331,21 @@ class _JoinDialogState extends State<_JoinDialog> {
       _busy = true;
       _error = null;
     });
-    final error = await WorldEntry.enter(context, widget.service, id);
+    final route = ModalRoute.of(context);
+    final error = await WorldEntry.enter(
+      context,
+      widget.service,
+      id,
+      // Close this dialog right before the next screen opens, so the home
+      // screen is what slides away (and nothing pops the wrong route later).
+      onOpening: () {
+        if (route != null && route.isActive) {
+          Navigator.of(context).removeRoute(route);
+        }
+      },
+    );
     if (!mounted) return;
-    if (error == null) {
-      Navigator.of(context).pop();
-    } else {
+    if (error != null) {
       setState(() {
         _busy = false;
         _error = error;
@@ -424,7 +427,7 @@ class _JoinDialogState extends State<_JoinDialog> {
               const SizedBox(height: ConqueraSpace.lg),
               ConqueraTextField(
                 controller: _worldId,
-                hint: 'enter world_id',
+                hint: '',
                 autofocus: true,
                 textInputAction: TextInputAction.go,
                 onChanged: (_) {

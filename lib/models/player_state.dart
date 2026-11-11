@@ -71,8 +71,8 @@ class PlayerState {
   DateTime? get attackReadyAt => lastAttackAt?.add(GameRules.attackCooldown);
 
   /// When the player may build again (null = right now).
-  DateTime? get buildReadyAt =>
-      lastDestroyAt?.add(GameRules.buildCooldownAfterDestroy);
+  /// There is no build cooldown any more (kept so the callers still work).
+  DateTime? get buildReadyAt => null;
 
   /// "#RRGGBB" -> Color (opaque).
   Color get color {
