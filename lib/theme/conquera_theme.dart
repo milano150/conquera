@@ -36,8 +36,17 @@ class ConqueraColors {
     }
   }
 
+  /// "Dark oceans" setting: the sea turns black, nothing else changes.
+  /// Ignored on the screens that are forced light (home, join).
+  static bool darkOceans = false;
+
   // Map
-  static Color get sea =>
+  static Color get sea => darkOceans && override == null
+      ? const Color(0xFF000000)
+      : seaPlain;
+
+  /// The regular sea color, for screens that put text straight on it.
+  static Color get seaPlain =>
       _p(const Color(0xFFA7CBE3), const Color(0xFF0A0F15), const Color(0xFF05080D));
   static Color get land =>
       _p(const Color(0xFFF1F6F3), const Color(0xFF18212B), const Color(0xFF0F1823));

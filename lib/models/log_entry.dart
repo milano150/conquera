@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum LogType { annex, attack, join, eliminated, respawn }
+enum LogType { annex, attack, join, eliminated, respawn, overthrow }
 
 /// One line of the world-wide Log, read from games/{gameId}/events.
 ///
@@ -55,6 +55,7 @@ class LogEntry {
       'join' => LogType.join,
       'eliminated' => LogType.eliminated,
       'respawn' => LogType.respawn,
+      'overthrow' => LogType.overthrow,
       _ => LogType.attack, // older attack events have no type
     };
     return LogEntry(

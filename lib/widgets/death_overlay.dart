@@ -34,6 +34,12 @@ class DeathOverlay extends StatefulWidget {
   /// Puts the player back in the world. May throw [GameActionException].
   final Future<void> Function() onRespawn;
 
+  /// Opens the "respawn as insurgency" screen.
+  final Future<void> Function() onInsurgency;
+
+  /// True when no free country is left, so insurgency is the only way back.
+  final bool Function() mapFull;
+
   /// Removes the player from the world for good. May throw
   /// [GameActionException]. The caller leaves the screen when it succeeds.
   final Future<void> Function() onQuit;
@@ -47,6 +53,8 @@ class DeathOverlay extends StatefulWidget {
     required this.provinceName,
     required this.loadLastInvasion,
     required this.onRespawn,
+    required this.onInsurgency,
+    required this.mapFull,
     required this.onQuit,
   });
 
@@ -76,6 +84,8 @@ class _DeathOverlayState extends State<DeathOverlay> {
   bool get _noTerritories {
     if (!widget.ready.value) return false;
     if (!widget.players.value.containsKey(widget.myUid)) return false;
+    // A hidden insurgent isn't dead.
+    if (widget.players.value[widget.myUid]?.insurgentIn != null) return false;
     return !widget.provinces.value.values
         .any((s) => s.ownerId == widget.myUid);
   }
@@ -234,7 +244,12 @@ class _DeathOverlayState extends State<DeathOverlay> {
         ignoring: !_dead,
         child: Opacity(opacity: t, child: child),
       ),
-      child: _content(),
+      // Rebuilds as territories change hands, so the Respawn button
+      // disappears the moment the map becomes full.
+      child: ListenableBuilder(
+        listenable: widget.provinces,
+        builder: (context, _) => _content(),
+      ),
     );
   }
 
@@ -243,6 +258,7 @@ class _DeathOverlayState extends State<DeathOverlay> {
     final invader =
         invasion == null ? null : widget.players.value[invasion.attackerId];
     final busy = _busy || _quitting;
+    final full = widget.mapFull();
 
     // Material ancestor: without one, Text falls back to the yellow
     // double-underline debug style.
@@ -303,20 +319,43 @@ class _DeathOverlayState extends State<DeathOverlay> {
                                 : const SizedBox(width: double.infinity),
                           ),
                           const SizedBox(height: ConqueraSpace.lg),
+                          if (full) ...[
+                            Text(
+                              'The map is full. The only way back in is '
+                              'as an insurgent.',
+                              textAlign: TextAlign.center,
+                              style: ConqueraText.label,
+                            ),
+                            const SizedBox(height: ConqueraSpace.sm),
+                          ] else ...[
+                            SizedBox(
+                              height: 44,
+                              child: FilledButton(
+                                onPressed: busy ? null : _respawn,
+                                child: _busy
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Text('Respawn'),
+                              ),
+                            ),
+                            const SizedBox(height: ConqueraSpace.sm),
+                          ],
                           SizedBox(
                             height: 44,
-                            child: FilledButton(
-                              onPressed: busy ? null : _respawn,
-                              child: _busy
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text('Respawn'),
-                            ),
+                            child: full
+                                ? FilledButton(
+                                    onPressed: busy ? null : widget.onInsurgency,
+                                    child: const Text('Respawn as insurgency'),
+                                  )
+                                : OutlinedButton(
+                                    onPressed: busy ? null : widget.onInsurgency,
+                                    child: const Text('Respawn as insurgency'),
+                                  ),
                           ),
                           const SizedBox(height: ConqueraSpace.sm),
                           SizedBox(

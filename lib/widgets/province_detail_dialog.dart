@@ -48,6 +48,10 @@ class ProvinceDetailDialog extends StatefulWidget {
   final ValueListenable<Map<String, PlayerState>> players;
   final FirestoreService firestore;
 
+  /// Insurgency mode: only the Build section is shown, it lists production
+  /// buildings only, and building is done in secret.
+  final bool insurgent;
+
   const ProvinceDetailDialog({
     super.key,
     required this.gameId,
@@ -60,6 +64,7 @@ class ProvinceDetailDialog extends StatefulWidget {
     required this.provinceStates,
     required this.players,
     required this.firestore,
+    this.insurgent = false,
   });
 
   @override
@@ -168,6 +173,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         gold: gold,
         ownedByType: _ownedByType,
         selected: _pendingBuilding,
+        productionOnly: widget.insurgent,
       ),
     );
     if (picked != null && mounted) setState(() => _pendingBuilding = picked);
@@ -176,6 +182,19 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
   Future<void> _build() {
     final building = _pendingBuilding;
     if (building == null) return Future.value();
+    if (widget.insurgent) {
+      return _run(
+        () => widget.firestore.constructInsurgentBuilding(
+          gameId: widget.gameId,
+          uid: widget.uid,
+          building: building,
+        ),
+        'Built ${building.name}.',
+      ).then((_) {
+        // Done: back to the map (the Build button disappears there).
+        if (mounted && !_isError) Navigator.of(context).pop();
+      });
+    }
     return _run(
       () => widget.firestore.constructBuilding(
         gameId: widget.gameId,
@@ -366,8 +385,8 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
             ],
           ),
 
-          // Owner-only sections
-          if (ownedByMe) ...[
+          // Owner-only sections (an insurgent only gets Build)
+          if (ownedByMe || widget.insurgent) ...[
             const SizedBox(height: ConqueraSpace.lg),
             Divider(height: 1, color: ConqueraColors.divider),
             const SizedBox(height: ConqueraSpace.lg),
@@ -379,16 +398,18 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               partners: partners,
               buildReadyAt: players[widget.uid]?.buildReadyAt,
             ),
-            const SizedBox(height: ConqueraSpace.lg),
-            Divider(height: 1, color: ConqueraColors.divider),
-            const SizedBox(height: ConqueraSpace.lg),
-            const _SectionTitle('Reinforce'),
-            const SizedBox(height: ConqueraSpace.sm),
-            ..._reinforceSection(
-              troops: troops,
-              gold: gold,
-              navy: province?.isNavalBase == true ? province!.navy : null,
-            ),
+            if (!widget.insurgent) ...[
+              const SizedBox(height: ConqueraSpace.lg),
+              Divider(height: 1, color: ConqueraColors.divider),
+              const SizedBox(height: ConqueraSpace.lg),
+              const _SectionTitle('Reinforce'),
+              const SizedBox(height: ConqueraSpace.sm),
+              ..._reinforceSection(
+                troops: troops,
+                gold: gold,
+                navy: province?.isNavalBase == true ? province!.navy : null,
+              ),
+            ],
             if (_message != null)
               Padding(
                 padding: const EdgeInsets.only(top: ConqueraSpace.md),
@@ -425,6 +446,19 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     required int partners,
     required DateTime? buildReadyAt,
   }) {
+    if (province != null && province.hasBuilding && widget.insurgent) {
+      // An insurgent can't destroy anything.
+      final def = GameRules.buildingById(province.buildingType);
+      return [
+        Row(
+          children: [
+            _IconSlot(icon: def?.icon ?? Icons.apartment),
+            const SizedBox(width: ConqueraSpace.md),
+            Expanded(child: _LockedField(text: province.buildingLabel)),
+          ],
+        ),
+      ];
+    }
     if (province != null && province.hasBuilding) {
       final def = GameRules.buildingById(province.buildingType);
       return [
@@ -1105,6 +1139,9 @@ class _BuildingPicker extends StatelessWidget {
   final Map<String, int> ownedByType;
   final BuildingDef? selected;
 
+  /// Insurgency: only plain gold producers are listed.
+  final bool productionOnly;
+
   const _BuildingPicker({
     required this.provinceId,
     required this.neighbors,
@@ -1112,11 +1149,13 @@ class _BuildingPicker extends StatelessWidget {
     required this.gold,
     required this.ownedByType,
     required this.selected,
+    this.productionOnly = false,
   });
 
   /// Buildings this territory can't hold are not shown at all.
   /// A refinery also needs a bordering rig or oil field of the player.
   bool _available(BuildingDef b) =>
+      (!productionOnly || GameRules.insurgentCanBuild(b)) &&
       GameRules.canBuildHere(b, provinceId, neighbors: neighbors) &&
       (b.suppliedBy.isEmpty || b.suppliedBy.any(ownNeighborTypes.contains));
 

@@ -264,6 +264,27 @@ class GameRules {
   /// first claim, and a mine or two.
   static const int startingGold = 150;
 
+  /// How long an insurgent must hide in a territory before they can
+  /// overthrow its owner.
+  static const Duration overthrowDelay = Duration(hours: 6);
+
+  /// True for a building with no neighbor links, supply chain or navy: it
+  /// can change hands or be built in secret without any other territory's
+  /// income depending on it.
+  static bool isPlainBuilding(String buildingType) {
+    final def = buildingById(buildingType);
+    if (def == null) return false;
+    return !def.tradesWithNeighbors &&
+        def.suppliedBy.isEmpty &&
+        !suppliesOthers(buildingType) &&
+        def.navalRadius <= 0;
+  }
+
+  /// Buildings an insurgent may build in their hideout: plain gold
+  /// producers.
+  static bool insurgentCanBuild(BuildingDef building) =>
+      building.goldPerSec > 0 && isPlainBuilding(building.id);
+
   /// Power a new player's starting territory begins with.
   static const double startingTroops = 10;
 

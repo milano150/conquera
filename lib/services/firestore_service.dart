@@ -199,10 +199,14 @@ class FirestoreService {
   /// whenever a bordering province changes hands.
   double _buildingIncomeOf(
     Map<String, dynamic>? provinceData,
-    String provinceId,
-  ) {
+    String provinceId, {
+    bool forInsurgent = false,
+  }) {
     final building = provinceData?['building'];
     if (building is! Map) return 0;
+    // A building an insurgent built in secret earns for the insurgent only,
+    // never for the territory's owner.
+    if (!forInsurgent && building['insurgent'] == true) return 0;
     final def = GameRules.buildingById(building['type'] as String? ?? '');
     if (def == null) return 0;
     return def.incomeFor(
@@ -1961,6 +1965,16 @@ class FirestoreService {
     }
     if (tradeFixes > 0) await batch.commit();
 
+    // An insurgent owns nothing but earns from the building in their hideout.
+    final hideout = data['insurgentIn'];
+    if (owned == 0 && hideout is String) {
+      final hideSnap = await _provincesRef(gameId).doc(hideout).get();
+      if (hideSnap.exists && hideSnap.data()?['ownerId'] != null) {
+        income += _buildingIncomeOf(hideSnap.data(), hideout,
+            forInsurgent: true);
+      }
+    }
+
     final storedCount = (data['ownedCount'] as num?)?.toInt();
     final storedIncome = (data['buildingIncome'] as num?)?.toDouble();
     final storedRate = (data['goldRate'] as num?)?.toDouble();
@@ -2102,6 +2116,278 @@ class FirestoreService {
       if (spawned) return provinceId;
     }
     throw const GameActionException('There is no free country to respawn in.');
+  }
+
+
+  // ---------------------------------------------------------------------
+  // Insurgency
+  // ---------------------------------------------------------------------
+
+  /// Puts a player who lost every territory back into the world as a secret
+  /// insurgent hiding in [provinceId], a territory somebody else owns. They
+  /// get [GameRules.startingGold] and the income of the building there (if
+  /// any). Nothing is announced in the world Log.
+  ///
+  /// Throws [GameActionException] if the player still owns a territory, is
+  /// already an insurgent, or the territory has no owner to hide from.
+  Future<void> respawnAsInsurgent({
+    required String gameId,
+    required String uid,
+    required String provinceId,
+  }) async {
+    final playerRef = _playerRef(gameId, uid);
+    final provinceRef = _provincesRef(gameId).doc(provinceId);
+
+    final stillOwns = await _provincesRef(gameId)
+        .where('ownerId', isEqualTo: uid)
+        .limit(1)
+        .get();
+    if (stillOwns.docs.isNotEmpty) {
+      throw const GameActionException('You still own a territory.');
+    }
+
+    final error = await _db.runTransaction<String?>((tx) async {
+      final playerSnap = await tx.get(playerRef);
+      if (!playerSnap.exists) return 'You have not joined this world.';
+      if (playerSnap.data()?['insurgentIn'] != null) {
+        return 'You are already an insurgent.';
+      }
+      final provinceSnap = await tx.get(provinceRef);
+      final data = provinceSnap.data();
+      final owner = data?['ownerId'] as String?;
+      if (!provinceSnap.exists || owner == null || owner == uid) {
+        return 'That territory is no longer held by anyone. Pick another.';
+      }
+      final income = _buildingIncomeOf(data, provinceId, forInsurgent: true);
+      tx.update(playerRef, {
+        'gold': GameRules.startingGold.toDouble(),
+        'goldUpdatedAt': FieldValue.serverTimestamp(),
+        'ownedCount': 0,
+        'buildingIncome': income,
+        'goldRate': GameRules.incomeRate(territories: 0, buildingIncome: income),
+        'insurgentIn': provinceId,
+        'insurgentSince': FieldValue.serverTimestamp(),
+      });
+      return null;
+    });
+    if (error != null) throw GameActionException(error);
+  }
+
+  /// Builds [building] in the insurgent's hideout. The territory's owner can
+  /// see it, but only the insurgent earns from it.
+  Future<void> constructInsurgentBuilding({
+    required String gameId,
+    required String uid,
+    required BuildingDef building,
+  }) async {
+    final playerRef = _playerRef(gameId, uid);
+    final error = await _db.runTransaction<String?>((tx) async {
+      final playerSnap = await tx.get(playerRef);
+      final provinceId = playerSnap.data()?['insurgentIn'] as String?;
+      if (!playerSnap.exists || provinceId == null) {
+        return 'You are not an insurgent.';
+      }
+      final provinceRef = _provincesRef(gameId).doc(provinceId);
+      final provinceSnap = await tx.get(provinceRef);
+      final data = provinceSnap.data();
+      if (!provinceSnap.exists || data?['ownerId'] == null) {
+        return 'This territory is no longer held by anyone.';
+      }
+      if (_buildingTypeOf(data) != 'none') {
+        return 'This territory already has a building.';
+      }
+      if (!GameRules.insurgentCanBuild(building) ||
+          !GameRules.canBuildHere(building, provinceId, neighbors: 1)) {
+        return "You can't build a ${building.name} here.";
+      }
+      final now = ServerClock.now();
+      final price = building.cost;
+      if (PlayerState.fromDoc(playerSnap).goldAt(now) < price) {
+        return 'Not enough gold.';
+      }
+      tx.update(provinceRef, {
+        'building': {
+          'type': building.id,
+          'level': 1,
+          'insurgent': true,
+        },
+      });
+      tx.update(
+        playerRef,
+        _settledIncomeUpdate(
+          playerSnap,
+          owned: 0,
+          buildingIncome:
+              _buildingIncome(playerSnap) + building.incomeFor(0, provinceId),
+          now: now,
+          spend: price.toDouble(),
+        ),
+      );
+      return null;
+    });
+    if (error != null) throw GameActionException(error);
+  }
+
+  /// Re-reads the building in the insurgent's hideout and fixes the
+  /// insurgent's income if it changed (destroyed, or the owner lost the
+  /// territory and the building with it). Does nothing for a non-insurgent.
+  Future<void> syncInsurgentIncome({
+    required String gameId,
+    required String uid,
+  }) async {
+    final playerRef = _playerRef(gameId, uid);
+    await _db.runTransaction<void>((tx) async {
+      final playerSnap = await tx.get(playerRef);
+      final provinceId = playerSnap.data()?['insurgentIn'];
+      if (provinceId is! String) return;
+      final provinceSnap =
+          await tx.get(_provincesRef(gameId).doc(provinceId));
+      final data = provinceSnap.data();
+      final income = provinceSnap.exists && data?['ownerId'] != null
+          ? _buildingIncomeOf(data, provinceId, forInsurgent: true)
+          : 0.0;
+      if ((_buildingIncome(playerSnap) - income).abs() < 1e-9) return;
+      tx.update(
+        playerRef,
+        _settledIncomeUpdate(
+          playerSnap,
+          owned: 0,
+          buildingIncome: income,
+          now: ServerClock.now(),
+        ),
+      );
+    });
+  }
+
+  /// The insurgent takes their hideout from its owner. Allowed once
+  /// [GameRules.overthrowDelay] has passed. The territory keeps its power;
+  /// a plain building stays (now earning for the new owner), a market, rig
+  /// or other linked building is lost. The old owner is told through their
+  /// notifications and the world Log gets a news line.
+  Future<void> overthrow({
+    required String gameId,
+    required String uid,
+    Iterable<String> neighborIds = const [],
+  }) async {
+    final playerRef = _playerRef(gameId, uid);
+    final first = await playerRef.get();
+    final provinceId = first.data()?['insurgentIn'] as String?;
+    if (provinceId == null) {
+      throw const GameActionException('You are not an insurgent.');
+    }
+    final provinceRef = _provincesRef(gameId).doc(provinceId);
+    final neighborRefs = [
+      for (final id in neighborIds.toSet())
+        if (id != provinceId) _provincesRef(gameId).doc(id),
+    ];
+
+    final error = await _db.runTransaction<String?>((tx) async {
+      final playerSnap = await tx.get(playerRef);
+      if (!playerSnap.exists || playerSnap.data()?['insurgentIn'] != provinceId) {
+        return 'You are not an insurgent here.';
+      }
+      final since = playerSnap.data()?['insurgentSince'];
+      if (since is! Timestamp) return 'Try again in a moment.';
+      final now = ServerClock.now();
+      final readyAt = since.toDate().add(GameRules.overthrowDelay);
+      if (now.isBefore(readyAt)) {
+        return 'You can overthrow them in '
+            '${readyAt.difference(now).inMinutes + 1} minutes.';
+      }
+
+      final provinceSnap = await tx.get(provinceRef);
+      final data = provinceSnap.data();
+      final hostId = data?['ownerId'] as String?;
+      if (!provinceSnap.exists) return 'This territory no longer exists.';
+      if (hostId == uid) return 'You already own this territory.';
+
+      DocumentReference<Map<String, dynamic>>? hostRef;
+      DocumentSnapshot<Map<String, dynamic>>? hostSnap;
+      if (hostId != null) {
+        hostRef = _playerRef(gameId, hostId);
+        hostSnap = await tx.get(hostRef);
+      }
+      final neighborSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in neighborRefs) {
+        neighborSnaps.add(await tx.get(ref));
+      }
+
+      // ---- writes ----
+      final type = _buildingTypeOf(data);
+      final keep = type != 'none' && GameRules.isPlainBuilding(type);
+      final hostIncomeLoss =
+          hostId == null ? 0.0 : _buildingIncomeOf(data, provinceId);
+      final keptIncome =
+          keep ? _buildingIncomeOf(data, provinceId, forInsurgent: true) : 0.0;
+      final shift = _shiftTrades(
+        tx,
+        neighborSnaps,
+        fromOwner: hostId,
+        toOwner: uid,
+        capturedBuildingType: keep ? 'none' : type,
+      );
+
+      tx.update(provinceRef, {
+        'ownerId': uid,
+        if (keep)
+          'building.insurgent': FieldValue.delete()
+        else
+          'building': {'type': 'none', 'level': 0},
+      });
+
+      tx.update(playerRef, {
+        ..._settledIncomeUpdate(
+          playerSnap,
+          owned: 1,
+          buildingIncome: keptIncome + shift.gain,
+          now: now,
+        ),
+        'insurgentIn': FieldValue.delete(),
+        'insurgentSince': FieldValue.delete(),
+      });
+
+      var eliminated = false;
+      if (hostRef != null && hostSnap != null && hostSnap.exists) {
+        final left = _ownedCount(hostSnap) - 1;
+        eliminated = left <= 0;
+        tx.update(
+          hostRef,
+          _settledIncomeUpdate(
+            hostSnap,
+            owned: left,
+            buildingIncome:
+                _buildingIncome(hostSnap) - hostIncomeLoss - shift.loss,
+            now: now,
+          ),
+        );
+      }
+
+      _logEvent(tx, gameId, 'overthrow', {
+        'actorId': uid,
+        'actorName': _nameOf(playerSnap),
+        'actorColor': _colorOf(playerSnap),
+        if (hostId != null) ...{
+          'defenderId': hostId,
+          'defenderName': _nameOf(hostSnap),
+          'defenderColor': _colorOf(hostSnap),
+        },
+        'targetId': provinceId,
+      });
+      if (eliminated && hostId != null) {
+        _logEvent(tx, gameId, 'eliminated', {
+          'actorId': uid,
+          'actorName': _nameOf(playerSnap),
+          'actorColor': _colorOf(playerSnap),
+          'victimId': hostId,
+          'victimName': _nameOf(hostSnap),
+          'victimColor': _colorOf(hostSnap),
+          'targetId': provinceId,
+        });
+        tx.update(playerRef, {'kills': FieldValue.increment(1)});
+      }
+      return null;
+    });
+    if (error != null) throw GameActionException(error);
   }
 
   /// Removes a player who lost every territory from the world for good by

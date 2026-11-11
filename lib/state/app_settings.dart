@@ -3,32 +3,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/conquera_theme.dart';
 
-/// Device-local app settings. Only the color mode for now.
+/// Device-local app settings. Only "dark oceans" for now.
 class AppSettings {
   const AppSettings._();
 
-  static const String _modeKey = 'theme_mode';
+  static const String _darkOceansKey = 'dark_oceans';
 
-  static ConqueraMode get mode => ConqueraColors.mode;
+  static bool get darkOceans => ConqueraColors.darkOceans;
 
   /// Call once before runApp.
   static Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_modeKey);
-    ConqueraColors.mode = ConqueraMode.values.firstWhere(
-      (m) => m.name == saved,
-      orElse: () => (prefs.getBool('dark_mode') ?? false)
-          ? ConqueraMode.dark
-          : ConqueraMode.light,
-    );
+    // The app is always in light mode now (dark / neon were removed).
+    ConqueraColors.mode = ConqueraMode.light;
+    ConqueraColors.darkOceans = prefs.getBool(_darkOceansKey) ?? false;
   }
 
-  static Future<void> setMode(ConqueraMode value) async {
-    ConqueraColors.mode = value;
+  static Future<void> setDarkOceans(bool value) async {
+    ConqueraColors.darkOceans = value;
     // Colors are read from static getters, so force every widget (and
     // painter) to rebuild. State is kept, like a hot reload.
     await WidgetsBinding.instance.reassembleApplication();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_modeKey, value.name);
+    await prefs.setBool(_darkOceansKey, value);
   }
 }

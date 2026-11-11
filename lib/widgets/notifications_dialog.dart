@@ -22,7 +22,13 @@ Color _hex(String? hex) {
 
 // ───────────────────────── model ─────────────────────────
 
-enum NotificationKind { invaded, missile, tradeReceived, tradeAccepted }
+enum NotificationKind {
+  invaded,
+  missile,
+  tradeReceived,
+  tradeAccepted,
+  overthrown,
+}
 
 /// One thing that happened to the player.
 class GameNotification {
@@ -139,16 +145,22 @@ class NotificationsController {
           .listen((snap) {
         _attacks = [
           for (final doc in snap.docs)
-            if ((doc.data()['type'] ?? 'attack') == 'attack' &&
+            if (((doc.data()['type'] ?? 'attack') == 'attack' ||
+                    doc.data()['type'] == 'overthrow') &&
                 doc.data()['defenderId'] == uid &&
                 doc.data()['at'] is Timestamp)
               GameNotification(
                 id: 'a_${doc.id}',
-                kind: NotificationKind.invaded,
+                kind: doc.data()['type'] == 'overthrow'
+                    ? NotificationKind.overthrown
+                    : NotificationKind.invaded,
                 at: (doc.data()['at'] as Timestamp).toDate(),
-                attackerId: doc.data()['attackerId'] as String? ?? '',
+                attackerId: (doc.data()['attackerId'] ??
+                        doc.data()['actorId']) as String? ??
+                    '',
                 targetId: doc.data()['targetId'] as String? ?? '',
-                won: doc.data()['won'] as bool? ?? false,
+                won: doc.data()['type'] == 'overthrow' ||
+                    (doc.data()['won'] as bool? ?? false),
                 attackerName: doc.data()['actorName'] as String?,
                 attackerColor: doc.data()['actorColor'] as String?,
               ),
@@ -724,7 +736,8 @@ class _Pamphlet extends StatelessWidget {
         final color = _hex(p?.colorHex ?? item.attackerColor);
         final territory = province?.name ?? item.targetId;
         final kind = item.kind;
-        final invasion = kind == NotificationKind.invaded;
+        final invasion = kind == NotificationKind.invaded ||
+            kind == NotificationKind.overthrown;
         final missile = kind == NotificationKind.missile;
 
         final building = GameRules.buildingById(item.building);
@@ -743,6 +756,8 @@ class _Pamphlet extends StatelessWidget {
             tint = ConqueraColors.accent;
           case NotificationKind.tradeAccepted:
             tint = ConqueraColors.success;
+          case NotificationKind.overthrown:
+            tint = ConqueraColors.danger;
         }
 
         final String title = switch (kind) {
@@ -751,6 +766,7 @@ class _Pamphlet extends StatelessWidget {
           NotificationKind.missile => ' fired a missile at ',
           NotificationKind.tradeReceived => ' sent you a trade offer',
           NotificationKind.tradeAccepted => ' accepted your trade offer',
+          NotificationKind.overthrown => ' overthrew you in ',
         };
 
         final String? detail = destroyed
@@ -764,12 +780,15 @@ class _Pamphlet extends StatelessWidget {
 
         final tagIcon = item.isTrade
             ? Icons.swap_horiz
-            : (invasion ? Icons.flag : Icons.rocket_launch);
+            : (kind == NotificationKind.overthrown
+                ? Icons.local_fire_department
+                : (invasion ? Icons.flag : Icons.rocket_launch));
         final tagText = switch (kind) {
           NotificationKind.invaded => 'INVASION',
           NotificationKind.missile => 'MISSILE STRIKE',
           NotificationKind.tradeReceived => 'TRADE OFFER',
           NotificationKind.tradeAccepted => 'TRADE ACCEPTED',
+          NotificationKind.overthrown => 'COUP',
         };
 
         final Widget art;

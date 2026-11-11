@@ -18,7 +18,9 @@ import '../models/missile_event.dart';
 import '../models/player_state.dart';
 import '../models/province.dart';
 import '../models/province_state.dart';
+import '../painters/insurgency_mask_painter.dart';
 import '../painters/map_painter.dart';
+import '../screens/insurgency_screen.dart';
 import '../screens/how_to_play_screen.dart';
 import '../services/spawn_candidates.dart';
 import '../widgets/death_overlay.dart';
@@ -32,6 +34,7 @@ import '../theme/conquera_theme.dart';
 import '../widgets/attack_dialog.dart';
 import '../widgets/country_info_panel.dart';
 import '../widgets/gold_amount.dart';
+import '../widgets/insurgency_panel.dart';
 import '../widgets/map_viewport.dart';
 import '../widgets/notifications_dialog.dart';
 import '../widgets/player_top_bar.dart';
@@ -353,6 +356,33 @@ class _MapScreenState extends State<MapScreen>
   /// The province named in the alert; tapping the alert pans to it.
   String? _alertTargetId;
 
+  // --- Insurgency view ---------------------------------------------------
+  // While the player hides in a foreign territory only that territory and its
+  // neighbours are visible; everything else is black and the camera is
+  // pinned to them.
+
+  /// The hideout the view is currently set up for (null = normal view).
+  String? _zoneHostId;
+
+  /// The hideout and its neighbours, as provinces (the mask's holes).
+  List<Province> _zoneProvinces = const [];
+
+  /// Set once the camera has flown in: pins pan and zoom to this area.
+  Rect? _zoneRect;
+
+  /// Black mask opacity: fades in on entering, out on leaving.
+  late final AnimationController _maskCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  /// True for the hideout and its neighbours while hiding as an insurgent.
+  bool _inZone(String id) =>
+      _zoneHostId != null && _zoneProvinces.any((p) => p.id == id);
+
+  /// Last hideout state the insurgent's income was synced for.
+  String? _insurgentSyncKey;
+
   // --- Camera pan toward the war zone -----------------------------------
   /// Last viewport size, remembered so the camera can be moved from code.
   Size _viewport = Size.zero;
@@ -374,6 +404,7 @@ class _MapScreenState extends State<MapScreen>
     super.initState();
     _loadLogSeen();
     _notifs.start();
+    _players.addListener(_onPlayersChanged);
     _controller.loadMap(widget.assetPath);
 
     _provincesSub = _firestore
@@ -384,6 +415,7 @@ class _MapScreenState extends State<MapScreen>
         _provinceStates.value = states;
         _provincesLoaded = true;
         _dataReady.value = _playersLoaded;
+        _maybeSyncInsurgentIncome();
       },
       onError: (Object e) => debugPrint('Provinces stream error: $e'),
     );
@@ -417,6 +449,8 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   void dispose() {
+    _players.removeListener(_onPlayersChanged);
+    _maskCtl.dispose();
     _provincesSub?.cancel();
     _playersSub?.cancel();
     _eventsSub?.cancel();
@@ -464,6 +498,8 @@ class _MapScreenState extends State<MapScreen>
   /// Highest and lowest map y the camera may show: the northern tip of
   /// Greenland, and a little past the southern tip of South America.
   (double, double) _verticalLimits() {
+    final zone = _zoneRect;
+    if (zone != null) return (zone.top, zone.bottom);
     final map = _controller.mapSize;
     final top =
         (_controller.provinceById('GL')?.bounds.top ?? 0) -
@@ -482,11 +518,15 @@ class _MapScreenState extends State<MapScreen>
   /// between the vertical limits.
   void _configureCamera(Size viewport) {
     final limits = _verticalLimits();
+    final zone = _zoneRect;
     _transform
-      ..wrapWidth = _controller.mapSize.width
+      ..wrapWidth = zone != null ? 0 : _controller.mapSize.width
       ..topLimit = limits.$1
       ..bottomLimit = limits.$2
-      ..viewportHeight = viewport.height;
+      ..leftLimit = zone?.left
+      ..rightLimit = zone?.right
+      ..viewportHeight = viewport.height
+      ..viewportWidth = viewport.width;
   }
 
   /// The most zoomed-out scale allowed: Africa fills the viewport, but
@@ -495,6 +535,12 @@ class _MapScreenState extends State<MapScreen>
   double _minScaleFor(Size viewport) {
     final map = _controller.mapSize;
     if (map.isEmpty || viewport.isEmpty) return 1.0;
+
+    // Insurgency: can't zoom out past the hideout and its neighbours.
+    final zone = _zoneRect;
+    if (zone != null) {
+      return min(viewport.width / zone.width, viewport.height / zone.height);
+    }
 
     final limits = _verticalLimits();
     var scale = max(
@@ -523,7 +569,8 @@ class _MapScreenState extends State<MapScreen>
     // Africa. A player who just spawned starts zoomed out on Africa and
     // then flies in slowly to their country (see _spawnFlight).
     final justSpawned = widget.focusProvinceId != null && !_spawnFlightDone;
-    final focus = (justSpawned ? null : _homePoint()) ??
+    final focus = _zoneRect?.center ??
+        (justSpawned ? null : _homePoint()) ??
         _africaRect()?.center ??
         map.center(Offset.zero);
 
@@ -535,6 +582,9 @@ class _MapScreenState extends State<MapScreen>
       ..scale(scale);
     _fittedFor = viewport;
     if (justSpawned) _spawnFlight();
+    // A returning insurgent: set up the hideout view once the map and the
+    // screen size are known.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onPlayersChanged());
   }
 
   bool _spawnFlightDone = false;
@@ -578,6 +628,192 @@ class _MapScreenState extends State<MapScreen>
     } finally {
       _cam.duration = normal;
     }
+  }
+
+  // --- Insurgency ---------------------------------------------------------
+
+  /// Reacts to the player's insurgency state: enters the hideout view when
+  /// they become an insurgent, leaves it when they overthrow (or die).
+  void _onPlayersChanged() {
+    if (!mounted || !_controller.isLoaded || _viewport.isEmpty) {
+      _maybeSyncInsurgentIncome();
+      return;
+    }
+    final hostId = _players.value[_uid]?.insurgentIn;
+    if (hostId != _zoneHostId) {
+      if (hostId == null) {
+        _leaveZone();
+      } else {
+        unawaited(_enterZone(hostId));
+      }
+    }
+    _maybeSyncInsurgentIncome();
+  }
+
+  /// Keeps the insurgent's income in step with the hideout's building.
+  void _maybeSyncInsurgentIncome() {
+    final hostId = _players.value[_uid]?.insurgentIn;
+    if (hostId == null) {
+      _insurgentSyncKey = null;
+      return;
+    }
+    if (!_provincesLoaded) return;
+    final s = _provinceStates.value[hostId];
+    final key = '$hostId|${s?.ownerId}|${s?.buildingType}|${s?.buildingLevel}';
+    if (key == _insurgentSyncKey) return;
+    _insurgentSyncKey = key;
+    _firestore
+        .syncInsurgentIncome(gameId: widget.gameId, uid: _uid)
+        .catchError((Object e) => debugPrint('Insurgent income sync: $e'));
+  }
+
+  Future<void> _enterZone(String hostId) async {
+    final host = _controller.provinceById(hostId);
+    if (host == null) return;
+    _zoneHostId = hostId;
+
+    final provinces = <Province>[host];
+    for (final id in _controller.neighborsOf(hostId)) {
+      final p = _controller.provinceById(id);
+      if (p != null) provinces.add(p);
+    }
+    var rect = host.bounds;
+    for (final p in provinces) {
+      rect = rect.expandToInclude(p.bounds);
+    }
+    rect = rect.inflate(max(rect.width, rect.height) * 0.06);
+    // A lone island shouldn't zoom the camera in absurdly far.
+    final minSide = _controller.mapSize.width * 0.12;
+    if (rect.width < minSide) rect = rect.inflate((minSide - rect.width) / 2);
+    if (rect.height < minSide * 0.6) {
+      rect = Rect.fromCenter(
+        center: rect.center,
+        width: rect.width,
+        height: minSide * 0.6,
+      );
+    }
+
+    _controller.clearSelection();
+    setState(() => _zoneProvinces = provinces);
+    unawaited(_maskCtl.forward(from: 0));
+
+    // Smooth fly-in to the zone.
+    final fit = min(_viewport.width / rect.width, _viewport.height / rect.height);
+    final map = _controller.mapSize;
+    final from = _currentFocus();
+    var targetX = rect.center.dx;
+    if (map.width > 0) {
+      targetX -= map.width * ((targetX - from.dx) / map.width).round();
+    }
+    _camFromFocus = from;
+    _camToFocus = Offset(targetX, rect.center.dy);
+    _camFromScale = _transform.value.getMaxScaleOnAxis();
+    _camToScale = fit;
+    final normal = _cam.duration;
+    _cam.duration = const Duration(milliseconds: 2400);
+    try {
+      await _cam.forward(from: 0);
+    } finally {
+      _cam.duration = normal;
+    }
+    if (!mounted || _zoneHostId != hostId) return;
+
+    // Lock the camera to the zone. The world is drawn twice side by side, so
+    // first slide the view onto the first copy (looks identical).
+    setState(() => _zoneRect = rect);
+    _configureCamera(_viewport);
+    final m = _transform.value;
+    final s = m.getMaxScaleOnAxis();
+    final focusX = (_viewport.width / 2 - m.storage[12]) / s;
+    final shift = map.width > 0 ? (focusX / map.width).floor() * map.width : 0.0;
+    _transform.value = Matrix4.identity()
+      ..translate(m.storage[12] + shift * s, m.storage[13])
+      ..scale(s);
+  }
+
+  void _leaveZone() {
+    _zoneHostId = null;
+    _cam.stop(canceled: false);
+    setState(() => _zoneRect = null);
+    _maskCtl.reverse().whenComplete(() {
+      if (mounted && _zoneHostId == null) {
+        setState(() => _zoneProvinces = const []);
+      }
+    });
+  }
+
+  /// The three most powerful territories somebody else owns.
+  List<InsurgencyCandidate> _topPowerCandidates() {
+    final list = <InsurgencyCandidate>[];
+    _provinceStates.value.forEach((id, s) {
+      final owner = s.ownerId;
+      if (owner == null || owner == _uid) return;
+      final province = _controller.provinceById(id);
+      if (province == null) return;
+      list.add(InsurgencyCandidate(
+        province: province,
+        state: s,
+        owner: _players.value[owner],
+      ));
+    });
+    list.sort((a, b) => b.state.troops.compareTo(a.state.troops));
+    return list.take(3).toList();
+  }
+
+  /// True when no country is free to respawn in.
+  bool _mapFull() {
+    for (final id in spawnCandidatesFor(_controller.provinces)) {
+      if (_provinceStates.value[id]?.ownerId == null) return false;
+    }
+    return true;
+  }
+
+  /// "Respawn as insurgency" button of the death screen.
+  Future<void> _openInsurgencyPicker() async {
+    await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => InsurgencyScreen(
+          candidates: _topPowerCandidates(),
+          onConfirm: (id) => _firestore.respawnAsInsurgent(
+            gameId: widget.gameId,
+            uid: _uid,
+            provinceId: id,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _overthrow() async {
+    final id = _players.value[_uid]?.insurgentIn;
+    if (id == null) return;
+    await _firestore.overthrow(
+      gameId: widget.gameId,
+      uid: _uid,
+      neighborIds: _controller.neighborsOf(id),
+    );
+    if (mounted) unawaited(_flyToTerritory(id));
+  }
+
+  /// The Build button of the insurgent box: the normal buildings menu, but
+  /// production buildings only.
+  void _openInsurgentBuild(String provinceId) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => ProvinceDetailDialog(
+        gameId: widget.gameId,
+        uid: _uid,
+        provinceId: provinceId,
+        provinceName: _controller.provinceById(provinceId)?.name ?? provinceId,
+        neighborIds: _controller.neighborsOf(provinceId),
+        canSee: true,
+        canSeeBuilding: true,
+        provinceStates: _provinceStates,
+        players: _players,
+        firestore: _firestore,
+        insurgent: true,
+      ),
+    );
   }
 
   /// Respawn button of the death screen.
@@ -647,6 +883,7 @@ class _MapScreenState extends State<MapScreen>
     final s = _provinceStates.value[id];
     if (s == null) return false;
     if (s.ownerId == _uid) return true;
+    if (_inZone(id)) return true; // an insurgent sees their whole zone
     if (GameRules.hiddenFromScouting(s.buildingType)) return false;
     return _canSee(id, radars);
   }
@@ -659,6 +896,7 @@ class _MapScreenState extends State<MapScreen>
     final s = states[id];
     if (s == null) return false;
     if (s.ownerId == _uid) return true;
+    if (_inZone(id)) return true; // an insurgent sees their whole zone
     for (final n in _controller.neighborsOf(id)) {
       final ns = states[n];
       if (ns != null &&
@@ -2027,6 +2265,7 @@ class _MapScreenState extends State<MapScreen>
     final start = _pointerDown;
     _pointerDown = null;
     if (start == null) return;
+    if (_zoneHostId != null) return; // nothing to select while hiding
     if ((e.position - start).distance <= _tapSlop) {
       // The scene holds two copies of the world: fold the tap back onto
       // the first one.
@@ -2295,7 +2534,9 @@ class _MapScreenState extends State<MapScreen>
                           // Can't zoom out past "Africa fills the screen".
                           final minScale = _minScaleFor(viewport);
                           final maxScale = max(_maxScale, minScale * 14);
-                          final powerMinScale = minScale * _powerZoomFactor;
+                          // While hiding, power and buildings show right at the zone's zoom.
+                          final powerMinScale = minScale *
+                              (_zoneHostId != null ? 0.9 : _powerZoomFactor);
 
                           // Two copies of the world side by side, so the
                           // view can scroll past the right edge onto the
@@ -2304,7 +2545,11 @@ class _MapScreenState extends State<MapScreen>
                           final sceneSize =
                               Size(mapSize.width * 2, mapSize.height);
 
-                          return MapViewport(
+                          return ColoredBox(
+                            color: _zoneProvinces.isEmpty
+                                ? Colors.transparent
+                                : Colors.black,
+                            child: MapViewport(
                             controller: _transform,
                             contentSize: sceneSize,
                             minScale: minScale,
@@ -2330,6 +2575,22 @@ class _MapScreenState extends State<MapScreen>
                                         ),
                                       ),
                                     ),
+                                    // Zebra stripes: the hideout is also yours.
+                                    if (_zoneProvinces.isNotEmpty)
+                                      IgnorePointer(
+                                        child: RepaintBoundary(
+                                          child: CustomPaint(
+                                            size: sceneSize,
+                                            painter: InsurgencyStripePainter(
+                                              host: _zoneProvinces.first,
+                                              color: _players.value[_uid]?.color ??
+                                                  ConqueraColors.danger,
+                                              wrapWidth: mapSize.width,
+                                              progress: _maskCtl,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     if (_battle != null)
                                       IgnorePointer(
                                         child: RepaintBoundary(
@@ -2389,6 +2650,20 @@ class _MapScreenState extends State<MapScreen>
                                         ),
                                       ),
                                     ),
+                                    if (_zoneProvinces.isNotEmpty)
+                                      IgnorePointer(
+                                        child: RepaintBoundary(
+                                          child: CustomPaint(
+                                            size: sceneSize,
+                                            painter: InsurgencyMaskPainter(
+                                              visible: _zoneProvinces,
+                                              hostId: _zoneHostId,
+                                              wrapWidth: mapSize.width,
+                                              progress: _maskCtl,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     if (_missileSiloId != null ||
                                         _navalBaseId != null)
                                       IgnorePointer(
@@ -2474,6 +2749,7 @@ class _MapScreenState extends State<MapScreen>
                                 ),
                               ),
                             ),
+                            ),
                           );
                         },
                       ),
@@ -2489,6 +2765,31 @@ class _MapScreenState extends State<MapScreen>
                       ),
                     _attackAlert(),
                     _logButton(),
+                    if (_players.value[_uid]?.insurgentIn != null)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Builder(builder: (context) {
+                          final me = _players.value[_uid]!;
+                          final hostId = me.insurgentIn!;
+                          final hostState = _provinceStates.value[hostId];
+                          final host = _players.value[hostState?.ownerId];
+                          return InsurgencyPanel(
+                            territoryName:
+                                _controller.provinceById(hostId)?.name ??
+                                    hostId,
+                            hostName: host?.displayName,
+                            hostColor: host?.color,
+                            readyAt: me.overthrowReadyAt,
+                            buildingLabel: hostState?.hasBuilding == true
+                                ? hostState!.buildingLabel
+                                : null,
+                            onOverthrow: _overthrow,
+                            onBuild: () => _openInsurgentBuild(hostId),
+                          );
+                        }),
+                      ),
                     NotificationsButton(
                       controller: _notifs,
                       bottom: ConqueraSpace.md +
@@ -2595,6 +2896,8 @@ class _MapScreenState extends State<MapScreen>
               loadLastInvasion: () =>
                   _firestore.lastInvasion(gameId: widget.gameId, uid: _uid),
               onRespawn: _respawn,
+              onInsurgency: _openInsurgencyPicker,
+              mapFull: _mapFull,
               onQuit: _quit,
             ),
           ),

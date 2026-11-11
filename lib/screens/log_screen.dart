@@ -222,6 +222,20 @@ class _LogScreenState extends State<LogScreen> {
           actor,
           const TextSpan(text: ' has respawned'),
         ]);
+      case LogType.overthrow:
+        return _line(e, ConqueraColors.danger, [
+          actor,
+          const TextSpan(text: ' overthrew '),
+          TextSpan(
+            text: _name(e.defenderId, e.defenderName),
+            style: TextStyle(
+              color: _playerColor(e.defenderId, e.defenderColor),
+            ),
+          ),
+          const TextSpan(text: ' in '),
+          target,
+          const TextSpan(text: ' in a coup'),
+        ]);
     }
   }
 

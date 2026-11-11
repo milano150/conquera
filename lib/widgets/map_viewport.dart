@@ -22,8 +22,16 @@ class MapCameraController extends TransformationController {
   double? topLimit;
   double? bottomLimit;
 
+  /// Leftmost / rightmost map x the view may show. Null = unlimited. Only
+  /// used while [wrapWidth] is 0 (the insurgency view is pinned to a zone).
+  double? leftLimit;
+  double? rightLimit;
+
   /// Height of the viewport in pixels (needed for the bottom limit).
   double viewportHeight = 0;
+
+  /// Width of the viewport in pixels (needed for the right limit).
+  double viewportWidth = 0;
 
   @override
   set value(Matrix4 newValue) => super.value = _constrain(newValue);
@@ -40,6 +48,14 @@ class MapCameraController extends TransformationController {
       // first world copy, and the second copy fills whatever is right of it.
       final period = wrapWidth * s;
       tx -= period * (tx / period).ceilToDouble();
+    }
+
+    final left = leftLimit;
+    final right = rightLimit;
+    if (wrapWidth <= 0 && left != null && right != null && viewportWidth > 0) {
+      final hiX = -left * s;
+      final loX = viewportWidth - right * s;
+      tx = loX > hiX ? (loX + hiX) / 2 : tx.clamp(loX, hiX).toDouble();
     }
 
     final top = topLimit;

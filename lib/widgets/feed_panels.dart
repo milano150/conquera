@@ -422,6 +422,16 @@ class LogPanel extends StatelessWidget {
           actor,
           const TextSpan(text: ' has respawned'),
         ], e.at);
+      case LogType.overthrow:
+        return _miniLine(ConqueraColors.danger, [
+          actor,
+          const TextSpan(text: ' overthrew '),
+          TextSpan(
+            text: _name(e.defenderId, e.defenderName),
+            style: TextStyle(color: _color(e.defenderId, e.defenderColor)),
+          ),
+          TextSpan(text: ' in ${_province(e.targetId)} in a coup'),
+        ], e.at);
     }
   }
 

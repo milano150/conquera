@@ -32,6 +32,11 @@ class PlayerState {
   /// Territories the player owns.
   final int ownedCount;
 
+  /// Insurgency: the territory this player is secretly hiding in (null =
+  /// not an insurgent) and since when.
+  final String? insurgentIn;
+  final DateTime? insurgentSince;
+
   const PlayerState({
     required this.uid,
     required this.displayName,
@@ -44,6 +49,8 @@ class PlayerState {
     this.victories = 0,
     this.kills = 0,
     this.ownedCount = 0,
+    this.insurgentIn,
+    this.insurgentSince,
   });
 
   factory PlayerState.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -51,6 +58,7 @@ class PlayerState {
     final updated = data['goldUpdatedAt'];
     final lastAttack = data['lastAttackAt'];
     final lastDestroy = data['lastDestroyAt'];
+    final insurgentSince = data['insurgentSince'];
     return PlayerState(
       uid: doc.id,
       displayName: (data['displayName'] as String?) ?? 'Player',
@@ -64,8 +72,16 @@ class PlayerState {
       victories: (data['victories'] as num?)?.toInt() ?? 0,
       kills: (data['kills'] as num?)?.toInt() ?? 0,
       ownedCount: (data['ownedCount'] as num?)?.toInt() ?? 0,
+      insurgentIn: data['insurgentIn'] as String?,
+      insurgentSince:
+          insurgentSince is Timestamp ? insurgentSince.toDate() : null,
     );
   }
+
+  /// When this insurgent may overthrow the owner of their hideout (null =
+  /// not an insurgent, or the server time isn't known yet).
+  DateTime? get overthrowReadyAt =>
+      insurgentSince?.add(GameRules.overthrowDelay);
 
   /// When the player may attack again (null = right now).
   DateTime? get attackReadyAt => lastAttackAt?.add(GameRules.attackCooldown);
