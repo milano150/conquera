@@ -137,7 +137,7 @@ class _MapScreenState extends State<MapScreen>
   StreamSubscription<Map<String, PlayerState>>? _playersSub;
   StreamSubscription<BattleEvent>? _eventsSub;
   StreamSubscription<MissileEvent>? _missilesSub;
-  StreamSubscription<Duration?>? _cooldownSub;
+  StreamSubscription<Map<String, dynamic>?>? _cooldownSub;
 
   // --- Log notification badge --------------------------------------------
   StreamSubscription<List<LogEntry>>? _logSub;
@@ -358,6 +358,11 @@ class _MapScreenState extends State<MapScreen>
   /// The province named in the alert; tapping the alert pans to it.
   String? _alertTargetId;
 
+  /// The X of the info bar hides the bar but keeps the province selected
+  /// (so a silo's range stays visible). Tapping a province shows it again.
+  bool _panelHidden = false;
+  String? _panelSeenId;
+
   // --- Insurgency view ---------------------------------------------------
   // While the player hides in a foreign territory only that territory and its
   // neighbours are visible; everything else is black and the camera is
@@ -439,12 +444,13 @@ class _MapScreenState extends State<MapScreen>
       _onMissileEvent,
       onError: (Object e) => debugPrint('Missile events stream error: $e'),
     );
-    _cooldownSub = _firestore.watchAttackCooldown(gameId: widget.gameId).listen(
-      (cooldown) {
-        GameRules.attackCooldown = cooldown ?? GameRules.defaultAttackCooldown;
+    // The world's prices and cooldowns (set from the admin page) apply live.
+    _cooldownSub = _firestore.watchWorldDoc(gameId: widget.gameId).listen(
+      (world) {
+        GameRules.applyWorldConfig(world);
         if (mounted) setState(() {});
       },
-      onError: (Object e) => debugPrint('Attack cooldown stream error: $e'),
+      onError: (Object e) => debugPrint('World settings stream error: $e'),
     );
     _logSub = _firestore.watchLog(gameId: widget.gameId).listen(
       (list) {
@@ -466,7 +472,7 @@ class _MapScreenState extends State<MapScreen>
     _missilesSub?.cancel();
     _logSub?.cancel();
     _cooldownSub?.cancel();
-    GameRules.attackCooldown = GameRules.defaultAttackCooldown;
+    GameRules.resetWorldConfig();
     for (final t in _graceTimers.values) {
       t.cancel();
     }
@@ -942,23 +948,18 @@ class _MapScreenState extends State<MapScreen>
     final navalProvince =
         navalId == null ? null : _controller.provinceById(navalId);
     if (aimProvince != null) {
-      final fraction = GameRules.missileRadiusOf(
-        _provinceStates.value[aimId]?.buildingType ?? '',
-      );
+      final fraction = _missileFraction(aimId!);
       circles = [(aimProvince.anchor, fraction * _controller.mapSize.width)];
       edge = ConqueraColors.danger;
     } else if (navalProvince != null) {
-      final fraction = GameRules.navalRadiusOf(
-        _provinceStates.value[navalId]?.buildingType ?? '',
-      );
+      final fraction = _navalFraction(navalId!);
       circles = [(navalProvince.anchor, fraction * _controller.mapSize.width)];
       edge = GameRules.navyColor;
     } else if (mine && GameRules.navalRadiusOf(state!.buildingType) > 0) {
       circles = [
         (
           selected!.anchor,
-          GameRules.navalRadiusOf(state.buildingType) *
-              _controller.mapSize.width
+          _navalFraction(selected!.id) * _controller.mapSize.width
         )
       ];
       edge = GameRules.navyColor;
@@ -968,8 +969,7 @@ class _MapScreenState extends State<MapScreen>
       circles = [
         (
           selected!.anchor,
-          GameRules.missileRadiusOf(state.buildingType) *
-              _controller.mapSize.width
+          _missileFraction(selected!.id) * _controller.mapSize.width
         )
       ];
       edge = ConqueraColors.danger;
@@ -1023,6 +1023,8 @@ class _MapScreenState extends State<MapScreen>
     _provinceStates.value.forEach((id, state) {
       final province = _controller.provinceById(id);
       if (province == null) return;
+      // The insurgent view only shows the hideout and its neighbours.
+      if (_zoneHostId != null && !_inZone(id)) return;
 
       // Briefly show what is left of a province you just failed to take.
       final revealed = _revealedPower[id];
@@ -1060,6 +1062,7 @@ class _MapScreenState extends State<MapScreen>
           navy: state.isNavalBase ? state.navy.floor() : null,
           extent: sqrt(province.bounds.width * province.bounds.height),
           color: _players.value[state.ownerId]?.color,
+          light: _inZone(id),
         ),
       );
     });
@@ -1878,8 +1881,9 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     final gold = _players.value[_uid]?.goldAt(now) ?? 0;
-    if (gold < GameRules.missileCost) {
-      _toast('A missile costs ${GameRules.missileCost} gold.');
+    final missilePrice = _missileCostOf(province.id);
+    if (gold < missilePrice) {
+      _toast('A missile costs $missilePrice gold.');
       return;
     }
     setState(() => _missileSiloId = province.id);
@@ -1899,21 +1903,45 @@ class _MapScreenState extends State<MapScreen>
       ..showSnackBar(SnackBar(content: Text(text)));
   }
 
-  bool _inMissileRange(String siloId, Province target) => _inRange(
-        siloId,
-        target,
-        GameRules.missileRadiusOf(
-          _provinceStates.value[siloId]?.buildingType ?? '',
-        ),
+  bool _inMissileRange(String siloId, Province target) =>
+      _inRange(siloId, target, _missileFraction(siloId));
+
+  /// Missile arsenals (same owner, max 1 counts) bordering the silo.
+  int _arsenalsAround(String siloId) {
+    final silo = _provinceStates.value[siloId];
+    if (silo == null) return 0;
+    return GameRules.arsenalCount([
+      for (final n in _controller.neighborsOf(siloId))
+        if (_provinceStates.value[n]?.ownerId == silo.ownerId)
+          _provinceStates.value[n]!.buildingType,
+    ]);
+  }
+
+  /// Missile range of the silo in [siloId], widened by a bordering arsenal.
+  double _missileFraction(String siloId) => GameRules.missileRadiusWith(
+        _provinceStates.value[siloId]?.buildingType ?? '',
+        _arsenalsAround(siloId),
       );
 
-  bool _inNavalRange(String baseId, Province target) => _inRange(
-        baseId,
-        target,
-        GameRules.navalRadiusOf(
-          _provinceStates.value[baseId]?.buildingType ?? '',
-        ),
-      );
+  /// Gold one missile from the silo in [siloId] costs.
+  int _missileCostOf(String siloId) =>
+      GameRules.missileCostWith(_arsenalsAround(siloId));
+
+  bool _inNavalRange(String baseId, Province target) =>
+      _inRange(baseId, target, _navalFraction(baseId));
+
+  /// Naval range of the base in [baseId], widened by its bordering
+  /// shipyards (same owner, max 2 count).
+  double _navalFraction(String baseId) {
+    final base = _provinceStates.value[baseId];
+    if (base == null) return 0;
+    final yards = GameRules.shipyardCount([
+      for (final n in _controller.neighborsOf(baseId))
+        if (_provinceStates.value[n]?.ownerId == base.ownerId)
+          _provinceStates.value[n]!.buildingType,
+    ]);
+    return GameRules.navalRadiusWith(base.buildingType, yards);
+  }
 
   bool _inRange(String fromId, Province target, double fraction) {
     final silo = _controller.provinceById(fromId);
@@ -2063,6 +2091,7 @@ class _MapScreenState extends State<MapScreen>
         uid: _uid,
         siloId: siloId,
         targetId: target.id,
+        siloNeighborIds: _controller.neighborsOf(siloId),
       );
     } on GameActionException catch (e) {
       error = e.message;
@@ -2289,6 +2318,7 @@ class _MapScreenState extends State<MapScreen>
         w > 0 ? Offset(p.dx % w, p.dy) : p,
         scale: _transform.value.getMaxScaleOnAxis(),
       );
+      if (_panelHidden) setState(() => _panelHidden = false);
       if (_missileSiloId != null) _onMissileTap();
       if (_navalBaseId != null) _onNavalTap();
     }
@@ -2513,6 +2543,10 @@ class _MapScreenState extends State<MapScreen>
                     selected == null ? null : _provinceStates.value[selected.id];
                 final selectedOwner = _players.value[selectedState?.ownerId];
                 _syncRadar(selected, selectedState);
+                if (selected?.id != _panelSeenId) {
+                  _panelSeenId = selected?.id;
+                  _panelHidden = false;
+                }
 
                 // Another player's province gets an Attack button; it only works
                 // if one of the player's own provinces borders it.
@@ -2622,22 +2656,6 @@ class _MapScreenState extends State<MapScreen>
                                       ),
                                     IgnorePointer(
                                       child: RepaintBoundary(
-                                        child: CustomPaint(
-                                          size: sceneSize,
-                                          painter: BadgePainter(
-                                            badges: _badges(),
-                                            transform: _transform,
-                                            powerMinScale: powerMinScale,
-                                            iconSize: _iconPxAtMinZoom / minScale,
-                                            powerSize:
-                                                _powerPxAtPowerZoom / powerMinScale,
-                                            wrapWidth: mapSize.width,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    IgnorePointer(
-                                      child: RepaintBoundary(
                                         child: AnimatedBuilder(
                                           animation: Listenable.merge(
                                               [_radarCtl, _radarOutCtl]),
@@ -2678,6 +2696,22 @@ class _MapScreenState extends State<MapScreen>
                                           ),
                                         ),
                                       ),
+                                    IgnorePointer(
+                                      child: RepaintBoundary(
+                                        child: CustomPaint(
+                                          size: sceneSize,
+                                          painter: BadgePainter(
+                                            badges: _badges(),
+                                            transform: _transform,
+                                            powerMinScale: powerMinScale,
+                                            iconSize: _iconPxAtMinZoom / minScale,
+                                            powerSize:
+                                                _powerPxAtPowerZoom / powerMinScale,
+                                            wrapWidth: mapSize.width,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                     if (_missileSiloId != null ||
                                         _navalBaseId != null)
                                       IgnorePointer(
@@ -2820,7 +2854,8 @@ class _MapScreenState extends State<MapScreen>
                         duration: const Duration(milliseconds: 160),
                         curve: Curves.easeOut,
                         alignment: Alignment.topCenter,
-                        child: selected == null
+                        child: selected == null ||
+                                (_panelHidden && aimId == null)
                             ? const SizedBox(width: double.infinity)
                             : CountryInfoPanel(
                                 name: selected.name,
@@ -2835,7 +2870,9 @@ class _MapScreenState extends State<MapScreen>
                                 building: _canSeeBuilding(selected.id)
                                     ? (selectedState?.buildingLabel ?? 'None')
                                     : '?',
-                                onClose: _controller.clearSelection,
+                                onClose: aimId == null
+                                    ? () => setState(() => _panelHidden = true)
+                                    : _controller.clearSelection,
                                 onOpenDetails: () => _openDetails(selected),
                                 isEnemy: isEnemy,
                                 isUnclaimed: isUnclaimed,
@@ -2866,14 +2903,14 @@ class _MapScreenState extends State<MapScreen>
                                           selectedState?.buildingType ?? '',
                                         ) >
                                         0
-                                    ? GameRules.missileCost
+                                    ? _missileCostOf(selected.id)
                                     : null,
                                 useEnabled: selectedState?.isNavalBase == true
                                     ? GameRules.canAct(selectedState!.navy)
                                     : (_players.value[_uid]
                                                 ?.goldAt(ServerClock.now()) ??
                                             0) >=
-                                        GameRules.missileCost,
+                                        _missileCostOf(selected.id),
                                 onUse: () => _useBuilding(selected, selectedState),
                                 useCancel:
                                     _missileSiloId != null || _navalBaseId != null,

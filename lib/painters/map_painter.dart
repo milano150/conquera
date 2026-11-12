@@ -489,6 +489,10 @@ class MapBadge {
   /// Draw a skull instead of the power number (mines blew up the attack).
   final bool skull;
 
+  /// Draw the icon and number in white (the insurgent's hideout, which is
+  /// shown brighter than the rest of the map).
+  final bool light;
+
   const MapBadge({
     required this.anchor,
     this.icon,
@@ -498,6 +502,7 @@ class MapBadge {
     this.color,
     this.opacity = 1,
     this.skull = false,
+    this.light = false,
   });
 
   @override
@@ -510,10 +515,11 @@ class MapBadge {
       other.extent == extent &&
       other.color == color &&
       other.opacity == opacity &&
-      other.skull == skull;
+      other.skull == skull &&
+      other.light == light;
 
   @override
-  int get hashCode => Object.hash(anchor, icon, power, navy, extent, color, opacity, skull);
+  int get hashCode => Object.hash(anchor, icon, power, navy, extent, color, opacity, skull, light);
 }
 
 /// The badge layer: a building icon in the centre of each province that
@@ -676,7 +682,8 @@ class BadgePainter extends CustomPainter {
     final showPower = powerOpacity > 0;
 
     for (final badge in badges) {
-      final color = _tint(badge.color);
+      final color =
+          badge.light ? Colors.white.withAlpha(255) : _tint(badge.color);
 
       // Sized to the province, capped at the normal size.
       final icon = badge.icon;

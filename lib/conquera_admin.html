@@ -21,6 +21,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}.bar{display:flex;gap
 .mapwrap{flex:1;min-width:0;min-height:480px;position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0a0f14}
 #msvg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;user-select:none}#msvg.drag{cursor:grabbing}
 #msvg g.pv{stroke:#0a0f14;stroke-width:.35;stroke-linejoin:round}#msvg g.pv:hover{stroke:var(--acc);stroke-width:1}#msvg g.pv.sel{stroke:#fff;stroke-width:1.6}
+#rtip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;display:none;white-space:nowrap;z-index:2}#rsvg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;user-select:none}#rsvg.drag{cursor:grabbing}#rsvg g.pv{stroke:#0a0f14;stroke-width:.35;stroke-linejoin:round}#rsvg g.pv:hover{stroke:#fff;stroke-width:1}.rgrad{height:10px;width:220px;border-radius:5px;background:linear-gradient(90deg,hsl(215,70%,45%),hsl(160,70%,45%),hsl(80,70%,45%),hsl(0,70%,45%))}
 #tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;display:none;white-space:nowrap;z-index:2}
 .drawer{max-height:calc(100vh - 150px);overflow:auto}#msvg g.pv.ins{stroke:#f0883e;stroke-width:1.2;stroke-dasharray:3 2}
 .lg{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--mut)}.lg span{cursor:pointer}.lg span.off{opacity:.35}
@@ -33,7 +34,10 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}.bar{display:flex;gap
   <div class="tabs" style="margin-top:12px">
     <button data-t="prov" class="on">🗺 Provinces</button>
     <button data-t="map">🌍 Live map</button>
+    <button data-t="rate">📈 Rate map</button>
     <button data-t="play">👥 Players</button>
+    <button data-t="cfg">⚙ Settings</button>
+    <button data-t="new">➕ New world</button>
     <button data-t="tools">🛠 Tools</button>
   </div>
   <small style="margin-top:auto">Writes go straight to the live database.</small>
@@ -57,13 +61,13 @@ const BTYPES=['none',...Object.keys(BUILD)];
 const NAMES={"KP":"North Korea","KR":"South Korea","LA":"Laos","RU":"Russia","FO":"Faroe Islands","BQBO":"Bonaire","BQSA":"Saba","BQSE":"Sint Eustatius","BN":"Brunei","CZ":"Czechia","CI":"Ivory Coast","CD":"DR Congo","CG":"Congo","FM":"Micronesia","MK":"North Macedonia","SZ":"Eswatini","GM":"Gambia","ST":"São Tomé and Príncipe","RE":"Réunion","BL":"Saint Barthélemy","MF":"Saint Martin","VI":"US Virgin Islands","TL":"East Timor","CV":"Cape Verde"};
 let names; try{names=new Intl.DisplayNames(['en'],{type:'region'})}catch(e){}
 const nm=id=>{if(NAMES[id])return NAMES[id];try{return names?names.of(id.length>2?id.slice(0,2):id)||id:id}catch(e){return id}};
-let gid=null,world={},players={},provs={},unsubs=[],tab='prov',sel=null,q='',ownerFilter='';
+let gid=null,world={},players={},provs={},unsubs=[],tab='prov',sel=null,q='',ownerFilter='',cfgDirty=false;
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pname=p=>esc(p?.displayName||p?.id||'?');
 function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.borderColor=bad?'var(--bad)':'var(--ok)';t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',2600)}
 const gref=()=>db.collection('games').doc(gid), P=()=>gref().collection('players'), V=()=>gref().collection('provinces');
-const readyTs=()=>firebase.firestore.Timestamp.fromMillis(Date.now()-6*3600e3-5*60e3); // overthrow unlocks 6h after insurgentSince
+const readyTs=()=>firebase.firestore.Timestamp.fromMillis(Date.now()-((world.config&&world.config.cooldowns&&typeof world.config.cooldowns.overthrow==='number'?world.config.cooldowns.overthrow:180)+5)*60e3); // overthrow unlocks 3h after insurgentSince
 const goldNow=p=>{const u=p.goldUpdatedAt?p.goldUpdatedAt.toDate().getTime():Date.now();return (p.gold||0)+(p.goldRate||0)*Math.max(0,(Date.now()-u)/1000)};
 const bIncome=(b,raw)=>!b||b.type==='none'||(b.insurgent&&!raw)?0:(BUILD[b.type]||0)+(b.type==='market'?PARTNER*(b.trades||0):0);
 
@@ -72,7 +76,7 @@ firebase.auth().signInAnonymously().catch(e=>toast('Auth failed: '+e.message,tru
 
 async function connect(){
   const id=$('#world').value.trim(); if(!id)return;
-  unsubs.forEach(f=>f());unsubs=[];gid=id;world={};players={};provs={};sel=null;
+  unsubs.forEach(f=>f());unsubs=[];gid=id;cfgDirty=false;$('#bar').dataset.tab='';world={};players={};provs={};sel=null;
   unsubs.push(P().onSnapshot(s=>{players={};s.forEach(d=>players[d.id]={id:d.id,...d.data()});render()},e=>toast(e.message,true)));
   unsubs.push(gref().onSnapshot(s=>{world=s.data()||{};render()},e=>toast(e.message,true)));
   unsubs.push(V().onSnapshot(s=>{provs={};s.forEach(d=>provs[d.id]={id:d.id,...d.data()});render()},e=>toast(e.message,true)));
@@ -102,7 +106,10 @@ async function recalcAll(){const b=db.batch();Object.keys(players).forEach(u=>ap
 // ---- views ----
 function render(){
   const bar=$('#bar'),body=$('#body');
+  if(tab==='new'){if(bar.dataset.tab!=='new'){bar.dataset.tab='new';renderNew(bar,body)}return} // never redraw while typing
+  if(tab==='rate'){if(bar.dataset.tab!=='rate'){bar.dataset.tab='rate';renderRate(bar,body)}return} // static data, no world needed
   if(!gid){bar.innerHTML='';body.innerHTML='<div class="mut">Enter a world id and press Go.</div>';return}
+  if(tab==='cfg'&&bar.dataset.tab==='cfg'&&cfgDirty)return; // keep unsaved edits
   if(tab==='tools'&&bar.dataset.tab==='tools'&&document.querySelector('#body input:focus'))return; // don't wipe a value being typed
   if(tab==='prov'&&$('#grid')&&bar.dataset.tab==='prov'){ // live refresh: keep focus & drawer edits
     const o=$('#of');if(o){const cur=ownerFilter;o.innerHTML=ownerOpts();o.value=cur}
@@ -110,7 +117,7 @@ function render(){
     if(!$('#dr').contains(document.activeElement)&&!$('#dr').dataset.dirty)drawDrawer();return}
   if(tab==='map'&&$('#msvg')&&bar.dataset.tab==='map'){paintMap();if(!$('#dr').contains(document.activeElement)&&!$('#dr').dataset.dirty)drawDrawer();return}
   bar.dataset.tab=tab;
-  if(tab==='prov')renderProv(bar,body);else if(tab==='map')renderMap(bar,body);else if(tab==='play')renderPlay(bar,body);else renderTools(bar,body);
+  if(tab==='prov')renderProv(bar,body);else if(tab==='map')renderMap(bar,body);else if(tab==='play')renderPlay(bar,body);else if(tab==='cfg')renderCfg(bar,body);else renderTools(bar,body);
 }
 const ownerOpts=()=>'<option value="">All owners</option><option value="__n">Neutral</option>'+Object.values(players).map(p=>`<option value="${esc(p.id)}">${pname(p)}</option>`).join('');
 function renderProv(bar,body){
@@ -212,6 +219,44 @@ function paintMap(){
   $('#lg').innerHTML=mapMode==='building'?Object.entries(BCOL).map(([t,c])=>`<span style="cursor:default"><i class="dot" style="background:${c}"></i>${t}</span>`).join(''):Object.values(players).sort((a,b)=>(cnt[b.id]||0)-(cnt[a.id]||0)).map(p=>`<span class="${hideP[p.id]?'off':''}" data-u="${esc(p.id)}"><i class="dot" style="background:${esc(p.colorHex)}"></i>${pname(p)} · ${cnt[p.id]||0}</span>`).join('');
   $('#lg').querySelectorAll('span[data-u]').forEach(s=>s.onclick=()=>{hideP[s.dataset.u]=!hideP[s.dataset.u];paintMap()});
 }
+// ---- Rate map: how much each territory would produce for one production building ----
+// Generated from building_overrides.dart / territory_types.dart / game_rules.dart: base = gold/hour at x1.0, cells = territory rate multiplier (only territories that can build it).
+const RATE_DATA=[{"id":"gold_mine","name":"Gold mine","base":1.44,"cells":{"AE":0.25,"AF":0.25,"AG":0.25,"AI":0.25,"AL":0.25,"AM":0.25,"AO":0.25,"AR":2.11,"AS":0.25,"AT":0.25,"AU":2.95,"AW":0.25,"AZ":0.25,"BA":0.25,"BB":0.25,"BD":0.25,"BE":0.25,"BF":2.47,"BG":1.49,"BH":0.25,"BI":0.25,"BJ":0.25,"BL":0.25,"BM":0.25,"BN":0.25,"BO":2.16,"BQBO":0.25,"BQSA":0.25,"BQSE":0.25,"BR":2.42,"BS":0.25,"BT":0.25,"BW":0.25,"BY":0.25,"BZ":0.25,"CA":2.81,"CD":2.14,"CF":0.25,"CG":0.25,"CH":0.25,"CI":2.26,"CL":2.05,"CM":0.25,"CN":3.0,"CO":2.32,"CR":0.25,"CU":0.25,"CV":0.25,"CW":0.25,"CY":0.25,"CZ":0.25,"DE":0.25,"DJ":0.25,"DK":0.25,"DM":0.25,"DO":1.91,"DZ":0.25,"EC":1.76,"EE":0.25,"EG":1.67,"EH":0.25,"ER":0.25,"ES":0.25,"ET":1.12,"FI":1.45,"FJ":0.25,"FK":0.25,"FM":0.25,"FO":0.25,"FR":0.25,"GA":0.25,"GB":0.25,"GD":0.25,"GE":0.25,"GF":0.25,"GH":2.65,"GL":0.25,"GM":0.25,"GN":2.33,"GP":0.25,"GQ":0.25,"GR":0.25,"GT":0.25,"GU":0.25,"GW":0.25,"GY":1.63,"HN":0.25,"HR":0.25,"HT":0.25,"HU":0.25,"ID":2.65,"IE":0.25,"IL":0.25,"IN":0.25,"IQ":0.25,"IR":0.25,"IS":0.25,"IT":0.25,"JM":0.25,"JO":0.25,"JP":0.25,"KE":0.25,"KG":2.01,"KH":0.25,"KM":0.25,"KN":0.25,"KP":0.25,"KR":0.25,"KW":0.25,"KY":0.25,"KZ":2.44,"LA":1.44,"LB":0.25,"LC":0.25,"LK":0.25,"LR":1.8,"LS":0.25,"LT":0.25,"LU":0.25,"LV":0.25,"LY":0.25,"MA":0.25,"MD":0.25,"ME":0.25,"MF":0.25,"MG":1.7,"MH":0.25,"MK":0.25,"ML":2.5,"MM":0.25,"MN":1.67,"MP":0.25,"MQ":0.25,"MR":1.84,"MS":0.25,"MT":0.25,"MU":0.25,"MV":0.25,"MW":0.25,"MX":2.65,"MY":0.25,"MZ":0.25,"NA":0.25,"NC":0.25,"NE":2.02,"NG":0.25,"NI":0.25,"NL":0.25,"NO":0.25,"NP":0.25,"NR":0.25,"NZ":1.29,"OM":0.25,"PA":0.25,"PE":2.64,"PF":0.25,"PG":2.2,"PH":1.99,"PK":0.25,"PL":0.25,"PR":0.25,"PS":0.25,"PT":0.25,"PW":0.25,"PY":0.25,"QA":0.25,"RE":0.25,"RO":0.25,"RS":0.25,"RU":3.0,"RW":0.25,"SA":0.25,"SB":0.25,"SC":0.25,"SD":2.37,"SE":1.33,"SI":0.25,"SK":0.25,"SL":0.25,"SN":1.73,"SO":0.25,"SR":1.76,"SS":0.25,"ST":0.25,"SV":0.25,"SX":0.25,"SY":0.25,"SZ":0.25,"TC":0.25,"TD":0.25,"TG":0.25,"TH":0.25,"TJ":0.25,"TL":0.25,"TM":0.25,"TN":0.25,"TO":0.25,"TR":2.06,"TT":0.25,"TV":0.25,"TW":0.25,"TZ":2.22,"UA":0.25,"UG":0.25,"US":2.7,"UY":0.25,"UZ":2.61,"VC":0.25,"VE":2.04,"VG":0.25,"VI":0.25,"VN":0.25,"VU":0.25,"WS":0.25,"XK":0.25,"YE":0.25,"YT":0.25,"ZA":2.5,"ZM":0.25,"ZW":2.17}},{"id":"fishing_harbor","name":"Fishing harbor","base":2.16,"cells":{"AE":1.04,"AG":0.25,"AI":0.25,"AL":0.25,"AO":1.46,"AR":1.64,"AS":0.25,"AU":1.28,"AW":0.25,"BA":0.25,"BB":0.25,"BD":1.61,"BE":0.25,"BG":0.25,"BH":0.25,"BJ":0.25,"BL":0.25,"BM":0.25,"BN":0.25,"BQBO":0.25,"BQSA":0.25,"BQSE":0.25,"BR":1.61,"BS":0.25,"BZ":0.25,"CA":1.64,"CD":0.25,"CG":0.25,"CI":0.25,"CL":1.85,"CM":0.25,"CN":2.34,"CO":1.17,"CR":0.74,"CU":0.68,"CV":0.25,"CW":0.25,"CY":0.25,"DE":0.25,"DJ":0.25,"DK":1.64,"DM":0.25,"DO":0.25,"DZ":1.1,"EC":1.61,"EE":0.25,"EG":1.43,"EH":0.25,"ER":0.25,"ES":1.64,"FI":0.25,"FJ":0.25,"FK":0.25,"FM":1.1,"FO":1.57,"FR":1.46,"GA":0.25,"GB":1.61,"GD":0.25,"GE":0.25,"GF":0.25,"GH":1.43,"GL":1.34,"GM":0.25,"GN":0.25,"GP":0.25,"GQ":0.25,"GR":0.25,"GT":0.86,"GU":0.25,"GW":0.25,"GY":0.25,"HN":0.86,"HR":0.25,"HT":0.25,"ID":2.2,"IE":1.28,"IL":0.25,"IN":2.03,"IQ":0.74,"IR":1.61,"IS":1.77,"IT":0.25,"JM":0.25,"JO":0.25,"JP":1.99,"KE":0.5,"KH":0.25,"KM":0.25,"KN":0.25,"KP":1.49,"KR":1.7,"KW":0.5,"KY":0.25,"LB":0.25,"LC":0.25,"LK":1.39,"LR":0.25,"LT":0.25,"LV":0.25,"LY":0.86,"MA":1.77,"ME":0.25,"MF":0.25,"MG":0.25,"MH":0.25,"MM":1.88,"MP":0.25,"MQ":0.25,"MR":1.57,"MS":0.25,"MT":0.25,"MU":0.25,"MV":0.25,"MX":1.81,"MY":1.81,"MZ":1.15,"NA":1.46,"NC":0.25,"NG":1.57,"NI":0.79,"NL":0.25,"NO":1.93,"NR":0.25,"NZ":1.46,"OM":1.28,"PA":1.21,"PE":2.13,"PF":0.25,"PG":1.34,"PH":1.87,"PK":1.52,"PL":0.25,"PR":0.25,"PS":0.25,"PT":1.28,"PW":0.25,"QA":0.25,"RE":0.25,"RO":0.25,"RU":2.1,"SA":1.04,"SB":1.1,"SC":0.25,"SD":0.25,"SE":0.25,"SI":0.25,"SL":0.25,"SN":1.52,"SO":1.21,"SR":0.25,"ST":0.25,"SV":0.25,"SX":0.25,"SY":0.25,"TC":0.25,"TG":0.25,"TH":1.77,"TL":0.25,"TN":1.1,"TO":0.25,"TR":1.43,"TT":0.25,"TV":0.25,"TW":1.67,"TZ":1.1,"UA":0.25,"US":2.07,"UY":0.25,"VC":0.25,"VE":1.34,"VG":0.25,"VI":0.25,"VN":2.02,"VU":0.25,"WS":0.25,"YE":1.21,"YT":0.25,"ZA":1.57}},{"id":"offshore_rig","name":"Offshore rig","base":3.96,"cells":{"AG":0.25,"AI":0.25,"AS":0.25,"AW":0.25,"BB":0.5,"BH":1.85,"BL":0.25,"BM":0.25,"BQBO":0.25,"BQSA":0.25,"BQSE":0.25,"BS":0.25,"CU":1.39,"CV":0.25,"CW":0.25,"CY":0.25,"DM":0.25,"FJ":0.25,"FK":1.34,"FM":0.25,"FO":0.25,"GB":2.15,"GD":0.25,"GL":0.25,"GP":0.25,"GU":0.25,"ID":2.16,"IE":0.25,"IS":0.25,"JM":0.25,"JP":0.25,"KM":0.25,"KN":0.25,"KY":0.25,"LC":0.25,"LK":0.25,"MF":0.25,"MG":0.25,"MH":0.25,"MP":0.25,"MQ":0.25,"MS":0.25,"MT":0.25,"MU":0.25,"MV":0.25,"NC":0.25,"NR":0.25,"NZ":1.01,"PF":0.25,"PG":1.4,"PH":0.5,"PR":0.25,"PW":0.25,"RE":0.25,"SB":0.25,"SC":0.25,"ST":0.25,"SX":0.25,"TC":0.25,"TO":0.25,"TT":1.54,"TV":0.25,"TW":0.25,"VC":0.25,"VG":0.25,"VI":0.25,"VU":0.25,"WS":0.25,"YT":0.25}},{"id":"oil_field","name":"Oil field","base":3.96,"cells":{"AE":2.62,"AO":2.32,"AR":2.21,"AU":2.06,"AZ":2.12,"BN":1.7,"BO":1.46,"BR":2.62,"CA":2.7,"CG":1.96,"CM":1.61,"CN":2.67,"CO":2.23,"DK":1.57,"DZ":2.27,"EC":2.1,"EG":2.14,"GA":1.91,"GH":1.81,"GQ":1.61,"GY":2.19,"IN":2.17,"IQ":2.67,"IR":2.61,"KW":2.54,"KZ":2.45,"LY":2.35,"MX":2.42,"MY":2.03,"NG":2.41,"NO":2.45,"OM":2.3,"PE":1.67,"QA":2.17,"RO":1.61,"RU":2.88,"SA":2.87,"SD":1.57,"SS":1.79,"TD":1.7,"TH":1.91,"TM":1.88,"TN":1.46,"US":2.97,"VE":2.27,"VN":1.85,"YE":1.61}},{"id":"island_resort","name":"Island resort","base":6.12,"cells":{"AG":1.0,"AI":1.0,"AS":1.0,"AW":1.0,"BB":1.0,"BH":1.0,"BL":1.0,"BM":1.0,"BQBO":1.0,"BQSA":1.0,"BQSE":1.0,"BS":1.0,"CU":1.0,"CV":1.0,"CW":1.0,"CY":1.0,"DM":1.0,"FJ":1.0,"FK":1.0,"FM":1.0,"FO":1.0,"GB":1.0,"GD":1.0,"GL":1.0,"GP":1.0,"GU":1.0,"ID":1.0,"IE":1.0,"IS":1.0,"JM":1.0,"JP":1.0,"KM":1.0,"KN":1.0,"KY":1.0,"LC":1.0,"LK":1.0,"MF":1.0,"MG":1.0,"MH":1.0,"MP":1.0,"MQ":1.0,"MS":1.0,"MT":1.0,"MU":1.0,"MV":1.0,"NC":1.0,"NR":1.0,"NZ":1.0,"PF":1.0,"PG":1.0,"PH":1.0,"PR":1.0,"PW":1.0,"RE":1.0,"SB":1.0,"SC":1.0,"ST":1.0,"SX":1.0,"TC":1.0,"TO":1.0,"TT":1.0,"TV":1.0,"TW":1.0,"VC":1.0,"VG":1.0,"VI":1.0,"VU":1.0,"WS":1.0,"YT":1.0}},{"id":"diamond_mine","name":"Diamond mine","base":5.76,"cells":{"AO":1.88,"AU":0.68,"BR":0.68,"BW":2.12,"CA":2.02,"CD":1.83,"CF":0.68,"GH":0.68,"GN":0.86,"GY":0.68,"LS":1.04,"NA":1.51,"RU":2.22,"SL":1.1,"TZ":0.86,"ZA":1.7,"ZW":1.64}},{"id":"uranium_mine","name":"Uranium mine","base":5.22,"cells":{"AU":1.68,"CA":1.97,"CN":1.4,"IN":1.1,"KZ":2.1,"NA":1.8,"NE":1.27,"RU":1.54,"UA":0.96,"US":0.93,"UZ":1.64,"ZA":0.86}},{"id":"silver_mine","name":"Silver mine","base":2.88,"cells":{"AR":1.35,"AU":1.42,"BO":1.48,"BR":0.81,"CA":1.01,"CL":1.53,"CN":1.72,"ES":0.84,"ID":1.11,"IN":1.33,"KZ":1.23,"MA":1.07,"MX":1.88,"PE":1.72,"PG":0.88,"PL":1.48,"RU":1.46,"SE":1.16,"US":1.4,"UZ":1.03}}];
+let rateB='gold_mine',rvb={x:0,y:0,w:2000,h:857};
+function renderRate(bar,body){
+  const B=()=>RATE_DATA.find(b=>b.id===rateB)||RATE_DATA[0];
+  bar.innerHTML=`<label>Building</label><select id="rb">${RATE_DATA.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select><button id="rz">＋</button><button id="ro">−</button><button id="rr">Reset view</button><span class="mut">scroll = zoom · drag = pan · colors = gold/hour a territory would produce · dark = cannot build here</span><div class="lg" id="rl" style="width:100%;align-items:center"></div>`;
+  body.innerHTML=`<div class="mapwrap" id="rw"><svg id="rsvg" viewBox="0 0 2000 857" xmlns="http://www.w3.org/2000/svg">${Object.keys(MAP).map(id=>`<g class="pv" data-id="${esc(id)}">${MAP[id].map(d=>`<path d="${d}"/>`).join('')}</g>`).join('')}</svg><div id="rtip"></div></div><div class="drawer on" id="rtop"></div>`;
+  const svg=$('#rsvg'),tip=$('#rtip'),gh=r=>B().base*r;
+  const col=t=>`hsl(${Math.round(215-215*t)},70%,45%)`;
+  const apply=()=>svg.setAttribute('viewBox',`${rvb.x} ${rvb.y} ${rvb.w} ${rvb.h}`);
+  const paint=()=>{
+    const b=B(),vals=Object.values(b.cells),mn=Math.min(...vals),mx=Math.max(...vals);
+    svg.querySelectorAll('g.pv').forEach(g=>{const r=b.cells[g.dataset.id];g.style.fill=r===undefined?'#232a33':col(mx>mn?(r-mn)/(mx-mn):.5)});
+    $('#rl').innerHTML=`<b style="color:var(--tx)">${esc(b.name)}</b><span style="cursor:default">${gh(mn).toFixed(2)}/hr</span><div class="rgrad"></div><span style="cursor:default">${gh(mx).toFixed(2)}/hr</span><span style="cursor:default">· ${vals.length} territories can build it · x1.0 = ${b.base.toFixed(2)}/hr${mx===mn?' · flat rate everywhere':''}</span>`;
+    const top=Object.entries(b.cells).sort((x,y)=>y[1]-x[1]||(x[0]<y[0]?-1:1));
+    $('#rtop').innerHTML=`<b>Best territories</b><small class="mut">${esc(b.name)} · gold/hour</small><table>${top.slice(0,15).map(([id,r])=>`<tr><td>${esc(id)}</td><td>${esc(nm(id))}</td><td style="text-align:right">${gh(r).toFixed(2)}</td></tr>`).join('')}</table>${top.length>15?`<small class="mut">…and ${top.length-15} more (lowest: ${gh(top[top.length-1][1]).toFixed(2)}/hr)</small>`:''}`;
+  };
+  $('#rb').value=rateB;$('#rb').onchange=e=>{rateB=e.target.value;paint()};
+  const zoom=f=>{const nw=Math.min(2000,Math.max(60,rvb.w*f)),k=nw/rvb.w;rvb={x:rvb.x+rvb.w/2-nw/2,y:rvb.y+rvb.h/2-rvb.h*k/2,w:nw,h:rvb.h*k};apply()};
+  $('#rz').onclick=()=>zoom(1/1.6);$('#ro').onclick=()=>zoom(1.6);$('#rr').onclick=()=>{rvb={x:0,y:0,w:2000,h:857};apply()};
+  let drag=null;
+  svg.onpointerdown=e=>{if(e.pointerType==='mouse'&&e.button!==0)return;drag={x:e.clientX,y:e.clientY,vx:rvb.x,vy:rvb.y,moved:false}};
+  svg.onpointermove=e=>{
+    if(drag){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+      if(!drag.moved&&Math.abs(dx)+Math.abs(dy)>4){drag.moved=true;svg.setPointerCapture(e.pointerId);svg.classList.add('drag');tip.style.display='none'}
+      if(drag.moved){const k=svg.getScreenCTM().a;rvb.x=drag.vx-dx/k;rvb.y=drag.vy-dy/k;apply()}return}
+    const g=e.target.closest&&e.target.closest('g.pv');
+    if(g){const id=g.dataset.id,r=B().cells[id],rc=$('#rw').getBoundingClientRect();tip.style.display='block';tip.style.left=(e.clientX-rc.left+12)+'px';tip.style.top=(e.clientY-rc.top+12)+'px';
+      tip.innerHTML=`<b>${esc(id)}</b> ${esc(nm(id))}<br>${r===undefined?'<span class="mut">cannot build a '+esc(B().name.toLowerCase())+' here</span>':'x'+r.toFixed(2)+' · <b>'+gh(r).toFixed(2)+' gold/hr</b>'}`}else tip.style.display='none'};
+  svg.onpointerup=()=>{drag=null;svg.classList.remove('drag')};
+  svg.onpointercancel=()=>{drag=null;svg.classList.remove('drag')};
+  svg.onpointerleave=()=>{tip.style.display='none'};
+  svg.onwheel=e=>{e.preventDefault();const f=e.deltaY>0?1.2:1/1.2,nw=Math.min(2000,Math.max(60,rvb.w*f)),k=nw/rvb.w;if(k===1)return;
+    const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const c=pt.matrixTransform(svg.getScreenCTM().inverse());
+    rvb.x=c.x-(c.x-rvb.x)*k;rvb.y=c.y-(c.y-rvb.y)*k;rvb.w=nw;rvb.h*=k;apply()};
+  apply();paint();
+}
 function renderPlay(bar,body){
   bar.innerHTML=`<b>${Object.keys(players).length} players</b>`;
   body.innerHTML=`<div style="flex:1"><table><tr><th>Player</th><th>Gold</th><th>Rate/min</th><th>Land</th><th></th></tr>${Object.values(players).map(p=>`<tr>
@@ -232,22 +277,100 @@ window.recalcOne=wrap(async uid=>{const b=db.batch();applyRecalc(b,uid,provs);aw
 window.delPlayer=wrap(async uid=>{if(!confirm('Delete this player and make their provinces neutral?'))return;const b=db.batch();Object.values(provs).filter(p=>p.ownerId===uid).forEach(p=>b.delete(V().doc(p.id)));b.delete(P().doc(uid));await b.commit();toast('Player deleted')});
 function renderTools(bar,body){
   bar.innerHTML='<b>Tools</b>';
-  const cdSet=typeof world.attackCooldownMinutes==='number'&&world.attackCooldownMinutes>=0,cdMin=cdSet?world.attackCooldownMinutes:DEFAULT_CD_MIN;
-  body.innerHTML=`<div><div class="card"><b>Attack cooldown</b><p class="mut">How long a player waits between attacks in this world. Applies live to everyone. 0 = no cooldown. Now: ${cdMin} min${cdSet?'':' (default, not set for this world)'}.</p><div class="row"><input id="cdm" type="number" min="0" step="any" value="${cdMin}" style="width:110px"><span class="mut">minutes</span><button class="p" onclick="setCd()">Save</button><button onclick="clearCd()">Use default (${DEFAULT_CD_MIN})</button></div></div>
+  body.innerHTML=`<div><div class="card"><b>Prices &amp; cooldowns</b><p class="mut">Moved to the ⚙ Settings tab (also the attack cooldown).</p></div>
   <div class="card"><b>Give gold to everyone</b><div class="row" style="margin-top:8px"><input id="gg" type="number" value="100"><button class="p" onclick="giveAll()">Give</button></div></div>
   <div class="card"><b>Reset everyone's cooldowns</b><p class="mut">Clears attack and build-after-destroy cooldowns, and makes every insurgent's overthrow available right away.</p><button class="p" onclick="resetAllCd()">Reset all</button></div>
   <div class="card"><b>Download backup</b><p class="mut">Saves players and provinces of this world as JSON. Do this before wiping.</p><button class="p" onclick="backup()">Download JSON</button></div>
   <div class="card"><b>Recalculate all players</b><p class="mut">Fixes land count, building income and gold rate from the actual provinces.</p><button class="p" onclick="recalcAll().catch(e=>toast(e.message,true))">Recalculate</button></div>
   <div class="card"><b>Neutralize ALL provinces</b><p class="mut">Deletes every province doc. Players stay but own nothing.</p><button class="d" onclick="wipe()">Wipe map…</button></div></div>`;
 }
-const DEFAULT_CD_MIN=60; // keep in sync with GameRules.defaultAttackCooldown in the app
-window.setCd=wrap(async()=>{const raw=$('#cdm').value.trim(),v=Number(raw);if(raw===''||!isFinite(v)||v<0)return toast('Enter minutes (0 or more)',true);await gref().set({attackCooldownMinutes:v},{merge:true});toast('Attack cooldown set to '+v+' min')});
-window.clearCd=wrap(async()=>{await gref().set({attackCooldownMinutes:firebase.firestore.FieldValue.delete()},{merge:true});toast('Back to the default cooldown')});
 window.resetAllCd=wrap(async()=>{const D=firebase.firestore.FieldValue.delete();const b=db.batch();Object.keys(players).forEach(u=>{const x={lastAttackAt:D,lastDestroyAt:D};if(players[u]?.insurgentIn)x.insurgentSince=readyTs();b.update(P().doc(u),x)});Object.values(provs).filter(p=>p.building&&p.building.lastUsedAt).forEach(p=>b.update(V().doc(p.id),{'building.lastUsedAt':D}));await b.commit();toast('Cooldowns reset for everyone')});
 window.backup=wrap(async()=>{const ser=o=>JSON.parse(JSON.stringify(o,(k,v)=>v&&typeof v.toDate==='function'?{__ts:v.toDate().toISOString()}:v));
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({world:gid,at:new Date().toISOString(),players:ser(players),provinces:ser(provs)},null,1)],{type:'application/json'}));a.download=`conquera-${gid}-${Date.now()}.json`;a.click();toast('Backup downloaded')});
 window.giveAll=wrap(async()=>{const n=Number($('#gg').value)||0;const b=db.batch();Object.values(players).forEach(p=>b.update(P().doc(p.id),{gold:goldNow(p)+n,goldUpdatedAt:TS()}));await b.commit();toast('Gave '+n+' to everyone')});
 window.wipe=wrap(async()=>{if(prompt('Type WIPE to confirm')!=='WIPE')return;const b=db.batch();Object.keys(provs).forEach(id=>b.delete(V().doc(id)));Object.keys(players).forEach(u=>applyRecalc(b,u,{}));await b.commit();toast('Map wiped')});
+// ================= World settings: prices, upscales, cooldowns, starting time =================
+// Everything here is stored in the world document: `config` (only values that differ from the
+// app defaults) and `startingTime`. The app reads it live, so edits apply even after the game started.
+const BLD=[['gold_mine','Gold mine',35,1],['fishing_harbor','Fishing harbor',65,1],['offshore_rig','Offshore rig',115,1],['oil_field','Oil field',115,1],['oil_refinery','Oil refinery',200,1],['island_resort','Island resort',250,1],['diamond_mine','Diamond mine',165,1],['uranium_mine','Uranium mine',150,1],['silver_mine','Silver mine',85,1],['market','Market',40,1],['fortress','Fortress',80,0],['wall','Wall',190,0],['mines','Mines',90,0],['dome','Dome',290,0],['watchtower','Watchtower',90,0],['radar','Radar',160,0],['high_altitude_radar','High altitude radar',320,0],['barracks','Barracks',65,0],['missile_silo','Missile silo',350,0],['naval_base','Naval base',300,0],['shipyard','Shipyard',200,0],['missile_arsenal','Missile arsenal',270,0]];
+// [key, label, default, hint]  (keep the defaults in sync with GameRules in the app)
+const GEN=[['startingGold','Starting gold',250,'gold a new player joins with'],['claimCost','Claim: base price',15,'gold, first territory'],['claimCostPerTerritory','Claim: upscale per territory owned',3,'gold added per extra territory'],['claimCostMax','Claim: max price',120,'gold, the upscale stops here'],['landGoldPerPower','Land power price',2,'gold per 1 power (Reinforce)'],['navyGoldPerPower','Navy power price',4,'gold per 1 navy (Reinforce)'],['missileCost','Missile price',150,'gold per launch (before arsenal discount)'],['buildCostStep','Income buildings: upscale step',15,'% added per building of the same kind you own'],['buildCostMaxMultiplier','Income buildings: max price multiplier',3,'× of the base price']];
+const CDS=[['attack','Attack cooldown',30,'minutes between attacks'],['missile','Missile silo reload',90,'minutes between launches of one silo'],['buildAfterDestroy','Build wait after destroying a building',3,'minutes'],['overthrow','Insurgent overthrow delay',180,'minutes hiding before an overthrow'],['tradeOffer','Trade offer lifetime',360,'minutes an offer stays open']];
+const GDEF=Object.fromEntries(GEN.map(g=>[g[0],g[2]]));
+let cfgDirty0=0;
+document.head.insertAdjacentHTML('beforeend','<style>.card.w{max-width:780px}.cfg td,.cfg th{padding:5px 8px}.cfg input[type=number]{width:92px}.cfg h4{margin:14px 0 4px;font-size:13px}.cfgrow{display:grid;grid-template-columns:1fr 100px;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}.cfgrow small{display:block}</style>');
+const nz=v=>(v===undefined||v===null)?'':v;
+function cfgHTML(cur){
+  cur=cur||{};const bc=cur.buildingCosts||{},bs=cur.buildingStep||{},bm=cur.buildingMaxMult||{},cd=cur.cooldowns||{};
+  const gv=k=>k==='buildCostStep'?(typeof cur[k]==='number'?cur[k]*100:GDEF[k]):(typeof cur[k]==='number'?cur[k]:GDEF[k]);
+  const legacy=typeof world.attackCooldownMinutes==='number'&&world.attackCooldownMinutes>=0?world.attackCooldownMinutes:null;
+  const cv=(k,d)=>typeof cd[k]==='number'?cd[k]:(k==='attack'&&legacy!==null?legacy:d);
+  return `<div class="cfg" oninput="cfgDirty=true">
+  <h4>Prices &amp; upscales</h4>
+  ${GEN.map(g=>`<div class="cfgrow"><span>${g[1]}<small class="mut">${g[3]} · default ${g[2]}</small></span><input id="c_${g[0]}" type="number" min="0" step="any" value="${gv(g[0])}"></div>`).join('')}
+  <h4>Building prices <span class="mut">(upscale step / max × override the global ones for that building; empty = global; only income buildings upscale)</span></h4>
+  <table><tr><th>Building</th><th>Price</th><th>Step %</th><th>Max ×</th></tr>
+  ${BLD.map(b=>`<tr><td>${b[1]}<small class="mut"> · default ${b[2]}</small></td><td><input id="b_${b[0]}" type="number" min="0" step="any" value="${nz(bc[b[0]]??b[2])}"></td>${b[3]?`<td><input id="s_${b[0]}" type="number" min="0" step="any" placeholder="global" value="${typeof bs[b[0]]==='number'?bs[b[0]]*100:''}"></td><td><input id="m_${b[0]}" type="number" min="1" step="any" placeholder="global" value="${nz(bm[b[0]])}"></td>`:'<td class="mut">flat</td><td class="mut">flat</td>'}</tr>`).join('')}
+  </table>
+  <h4>Cooldowns (minutes)</h4>
+  ${CDS.map(c=>`<div class="cfgrow"><span>${c[1]}<small class="mut">${c[3]} · default ${c[2]}</small></span><input id="k_${c[0]}" type="number" min="0" step="any" value="${cv(c[0],c[2])}"></div>`).join('')}
+  </div>`;
+}
+// Reads the editor back; only values that differ from the app defaults are kept.
+function readCfg(){
+  const cfg={};let bad=null;
+  const num=id=>{const el=$('#'+id);if(!el)return null;const t=el.value.trim();if(t==='')return null;const v=Number(t);if(!isFinite(v)||v<0){bad=bad||el.closest('.cfgrow,tr')?.innerText.split('\n')[0]||id;return null}return v};
+  GEN.forEach(g=>{let v=num('c_'+g[0]);if(v===null)return;if(g[0]==='buildCostStep')v/=100;const d=g[0]==='buildCostStep'?g[2]/100:g[2];if(Math.abs(v-d)>1e-9)cfg[g[0]]=v});
+  const bc={},bs={},bm={};
+  BLD.forEach(b=>{const c=num('b_'+b[0]);if(c!==null&&c!==b[2])bc[b[0]]=c;if(b[3]){const s=num('s_'+b[0]);if(s!==null)bs[b[0]]=s/100;const m=num('m_'+b[0]);if(m!==null)bm[b[0]]=m}});
+  if(Object.keys(bc).length)cfg.buildingCosts=bc;if(Object.keys(bs).length)cfg.buildingStep=bs;if(Object.keys(bm).length)cfg.buildingMaxMult=bm;
+  const cd={};CDS.forEach(c=>{const v=num('k_'+c[0]);if(v!==null&&v!==c[2])cd[c[0]]=v});
+  if(Object.keys(cd).length)cfg.cooldowns=cd;
+  return {cfg,bad};
+}
+const pad2=n=>String(n).padStart(2,'0');
+const toLocalInput=d=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+function readStart(){const t=$('#st_time').value;if(!t)return null;const d=new Date(t);return isNaN(d)?undefined:d}
+function renderNew(bar,body){
+  bar.innerHTML='<b>New world</b>';
+  const soon=new Date(Date.now()+30*60e3);
+  body.innerHTML=`<div><div class="card w"><b>Create a world</b>
+  <p class="mut">Creates the world document with its own prices and cooldowns. Players who join before the starting time wait on a countdown screen with the lobby list. Everything below can be changed later, also after the game started (⚙ Settings tab).</p>
+  <div class="cfgrow"><span>World id<small class="mut">letters, numbers, - and _ (what players type to join)</small></span><input id="nw_id" placeholder="e.g. cheese" style="width:100%"></div>
+  <div class="cfgrow"><span>Starting time<small class="mut">your local time. Empty = open right away</small></span><input id="st_time" type="datetime-local" value="${toLocalInput(soon)}" style="width:100%"></div>
+  ${cfgHTML({})}
+  <div class="row" style="margin-top:12px"><button class="p" onclick="createWorld()">Create world</button></div></div></div>`;
+}
+window.createWorld=wrap(async()=>{
+  const id=$('#nw_id').value.trim();if(!/^[A-Za-z0-9_-]{1,40}$/.test(id))return toast('World id: 1-40 letters, numbers, - or _',true);
+  const st=readStart();if(st===undefined)return toast('Starting time is not valid',true);
+  const {cfg,bad}=readCfg();if(bad)return toast('Fix this value: '+bad,true);
+  const ref=db.collection('games').doc(id);if((await ref.get()).exists)return toast('A world with that id already exists',true);
+  const doc={createdAt:TS(),config:cfg};if(st)doc.startingTime=firebase.firestore.Timestamp.fromDate(st);
+  await ref.set(doc);toast('World "'+id+'" created');
+  $('#world').value=id;tab='cfg';document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.t==='cfg'));connect();
+});
+function renderCfg(bar,body){
+  bar.innerHTML='<b>Settings</b><span class="mut">live: players get changes immediately</span>';
+  const st=world.startingTime&&world.startingTime.toDate?world.startingTime.toDate():null;
+  const state=st?(st>new Date()?'starts '+st.toLocaleString():'started '+st.toLocaleString()):'no starting time (open)';
+  body.innerHTML=`<div><div class="card w"><b>World settings: ${esc(gid)}</b><p class="mut">${esc(state)}</p>
+  <div class="cfgrow"><span>Starting time<small class="mut">your local time. Empty = no waiting room</small></span><input id="st_time" type="datetime-local" value="${st?toLocalInput(st):''}" oninput="cfgDirty=true" style="width:100%"></div>
+  ${cfgHTML(world.config)}
+  <div class="row" style="margin-top:12px"><button class="p" onclick="saveCfg()">Save</button><button class="d" onclick="resetCfg()">Reset everything to defaults</button></div></div></div>`;
+}
+window.saveCfg=wrap(async()=>{
+  const st=readStart();if(st===undefined)return toast('Starting time is not valid',true);
+  const {cfg,bad}=readCfg();if(bad)return toast('Fix this value: '+bad,true);
+  const D=firebase.firestore.FieldValue.delete();
+  await gref().update({config:cfg,startingTime:st?firebase.firestore.Timestamp.fromDate(st):D,attackCooldownMinutes:D});
+  cfgDirty=false;toast('Settings saved, live for everyone');
+});
+window.resetCfg=wrap(async()=>{
+  if(!confirm('Reset every price, upscale and cooldown of this world to the app defaults?'))return;
+  const D=firebase.firestore.FieldValue.delete();
+  await gref().update({config:D,attackCooldownMinutes:D});cfgDirty=false;toast('Back to the defaults');
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sel&&(tab==='map'||tab==='prov')){sel=null;refreshSel()}});
 setInterval(()=>{if(gid&&tab==='play'&&!document.querySelector('#body :focus'))render()},5000);
 render();

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../config/game_rules.dart';
+
 /// Why an offer can't be accepted right now. Null means it can.
 enum TradeProblem { expired, ownerChanged, buildingAppeared, giverShort }
 
@@ -11,7 +13,7 @@ enum TradeProblem { expired, ownerChanged, buildingAppeared, giverShort }
 /// the receiver ([toId]).
 class TradeOffer {
   /// How long an offer stays open.
-  static const Duration lifetime = Duration(hours: 12);
+  static Duration get lifetime => GameRules.tradeOfferLifetime;
 
   final String id;
   final String fromId;

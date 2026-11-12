@@ -24,8 +24,8 @@ import 'stat_block.dart';
 /// listens to (passed in as listenables), so numbers update the moment a
 /// purchase goes through, and gold keeps ticking while the window is open.
 /// Reinforcing prices: gold per point of power.
-const int _landGoldPerPower = 2;
-const int _navyGoldPerPower = 5;
+int get _landGoldPerPower => GameRules.landGoldPerPower;
+int get _navyGoldPerPower => GameRules.navyGoldPerPower;
 
 /// Most land power that can be bought in one go.
 const int _maxLandPerPurchase = 1000;
@@ -272,6 +272,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
         provinceId: widget.provinceId,
         uid: widget.uid,
         unit: unit,
+        neighborIds: widget.neighborIds,
       );
       if (mounted) setState(() => _navyPower = 1);
     }, '+$power navy added.', sound: 'reinforce');
@@ -561,7 +562,12 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
     final power = maxLand < 1 ? 0 : _power.clamp(1, maxLand).toInt();
 
     // Navy: 1 .. gold / 5, capped by the room left in the naval base.
-    final navyRoom = navy == null ? 0 : (GameRules.maxNavy - navy).ceil();
+    final navyCap = GameRules.maxNavyFor(GameRules.shipyardCount([
+      for (final id in widget.neighborIds)
+        if (widget.provinceStates.value[id]?.ownerId == widget.uid)
+          widget.provinceStates.value[id]!.buildingType,
+    ]));
+    final navyRoom = navy == null ? 0 : (navyCap - navy).ceil();
     final maxNavy = math.min(gold ~/ _navyGoldPerPower, navyRoom);
     final navyPower = maxNavy < 1 ? 0 : _navyPower.clamp(1, maxNavy).toInt();
 
@@ -605,7 +611,7 @@ class _ProvinceDetailDialogState extends State<ProvinceDetailDialog> {
               style: ConqueraText.figure.copyWith(color: GameRules.navyColor),
             ),
             Text(
-              ' / ${GameRules.maxNavy.floor()}',
+              ' / ${navyCap.floor()}',
               style: ConqueraText.label,
             ),
             const SizedBox(width: ConqueraSpace.sm),
@@ -1128,7 +1134,12 @@ enum _Category {
 _Category _categoryOf(BuildingDef b) => switch (b.id) {
       'watchtower' || 'radar' || 'high_altitude_radar' => _Category.surveillance,
       'fortress' || 'wall' || 'mines' || 'dome' => _Category.defense,
-      'barracks' || 'missile_silo' || 'naval_base' => _Category.military,
+      'barracks' ||
+      'missile_silo' ||
+      'missile_arsenal' ||
+      'naval_base' ||
+      'shipyard' =>
+        _Category.military,
       _ => _Category.production,
     };
 
@@ -1165,7 +1176,9 @@ class _BuildingPicker extends StatelessWidget {
   bool _available(BuildingDef b) =>
       (!productionOnly || GameRules.insurgentCanBuild(b)) &&
       GameRules.canBuildHere(b, provinceId, neighbors: neighbors) &&
-      (b.suppliedBy.isEmpty || b.suppliedBy.any(ownNeighborTypes.contains));
+      (b.suppliedBy.isEmpty || b.suppliedBy.any(ownNeighborTypes.contains)) &&
+      (b.requiresNeighbor.isEmpty ||
+          b.requiresNeighbor.any(ownNeighborTypes.contains));
 
   @override
   Widget build(BuildContext context) {

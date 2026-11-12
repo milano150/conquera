@@ -9,8 +9,10 @@ import '../state/map_controller.dart';
 import '../theme/conquera_theme.dart';
 import '../widgets/fade_route.dart';
 import '../widgets/light_screens_observer.dart';
+import '../services/server_clock.dart';
 import 'home_screen.dart';
 import 'map_screen.dart';
+import 'waiting_screen.dart';
 
 /// Shown right before a world opens. It does all the heavy work first (map
 /// parsing, borders, the world's first data from Firestore), so the map
@@ -132,6 +134,26 @@ class _LoadingScreenState extends State<LoadingScreen>
 
     await SavedWorld.save(widget.gameId); // reopen this world next launch
     await RecentWorlds.add(widget.gameId);
+    if (!mounted) return;
+
+    // A world that hasn't started yet: wait in the lobby until it does.
+    try {
+      final startsAt = await FirestoreService()
+          .fetchStartingTime(gameId: widget.gameId)
+          .timeout(const Duration(seconds: 8));
+      if (startsAt != null && ServerClock.now().isBefore(startsAt)) {
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          FadeRoute<void>(
+            settings: const RouteSettings(name: kLightRouteName),
+            builder: (_) => WaitingScreen(gameId: widget.gameId),
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      debugPrint('Start time check failed: $e');
+    }
     if (!mounted) return;
 
     Navigator.of(context).pushReplacement(

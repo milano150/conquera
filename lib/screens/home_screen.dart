@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/saved_world.dart';
+import '../config/recent_worlds.dart';
 import '../services/firestore_service.dart';
 import '../services/world_entry.dart';
 import '../theme/conquera_theme.dart';
@@ -52,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _creatorTap.onTap = _openCreator;
+    RecentWorlds.openWorlds.addListener(_onOpenWorlds);
     if (widget.startOnWorlds) {
       _worldsShown = true;
       _ctrl.value = 1;
@@ -64,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    RecentWorlds.openWorlds.removeListener(_onOpenWorlds);
     _creatorTap.dispose();
     _ctrl.dispose();
     super.dispose();
@@ -85,6 +88,11 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (_) {
       // No browser available: nothing to do.
     }
+  }
+
+  /// Coming back from a world's waiting screen: show the worlds list.
+  void _onOpenWorlds() {
+    if (mounted && !_worldsShown) _showWorlds();
   }
 
   void _showWorlds() {

@@ -45,7 +45,7 @@ class CountryInfoPanel extends StatelessWidget {
   final VoidCallback? onClaim;
 
   /// What claiming this territory costs the player right now.
-  final int claimPrice;
+  final int? claimPrice;
 
   /// Whether the player has enough gold to claim right now (null = always).
   /// A function because gold keeps growing: the button re-checks it every
@@ -89,7 +89,7 @@ class CountryInfoPanel extends StatelessWidget {
     this.attackReadyAt,
     this.onAttack,
     this.onClaim,
-    this.claimPrice = GameRules.claimCost,
+    this.claimPrice,
     this.useIcon,
     this.useColor,
     this.onUse,
@@ -186,7 +186,7 @@ class CountryInfoPanel extends StatelessWidget {
                       if (canAttack)
                         _ActionButton(
                           label: 'Claim',
-                          price: claimPrice,
+                          price: claimPrice ?? GameRules.claimCost,
                           affordable: claimAffordable,
                           color: ConqueraColors.accent,
                           enabled: canSplit,

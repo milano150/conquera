@@ -181,6 +181,24 @@ class FirestoreService {
     });
   }
 
+  /// The world document's data, live (prices, cooldowns, starting time).
+  /// Emits null if the world has no document.
+  Stream<Map<String, dynamic>?> watchWorldDoc({required String gameId}) =>
+      _gameRef(gameId).snapshots().map((snap) => snap.data());
+
+  /// When the world starts (`startingTime` on the world document), or null
+  /// if it has no start time or has already started.
+  Future<DateTime?> fetchStartingTime({required String gameId}) async {
+    final snap = await _gameRef(gameId).get();
+    return startingTimeOf(snap.data());
+  }
+
+  /// Reads `startingTime` out of a world document's data.
+  static DateTime? startingTimeOf(Map<String, dynamic>? world) {
+    final t = world?['startingTime'];
+    return t is Timestamp ? t.toDate() : null;
+  }
+
   // ---------------------------------------------------------------------
   // Small readers
   // ---------------------------------------------------------------------
@@ -511,8 +529,9 @@ class FirestoreService {
     final price = GameRules.buildCostFor(building, sameKind);
     // Only a market needs to know who the neighbors belong to.
     final supplies = GameRules.suppliesOthers(building.id);
+    final needsNeighbor = building.requiresNeighbor.isNotEmpty;
     final neighborRefs = [
-      if (building.tradesWithNeighbors || supplies)
+      if (building.tradesWithNeighbors || supplies || needsNeighbor)
         for (final id in neighbors) _provincesRef(gameId).doc(id),
     ];
 
@@ -557,6 +576,14 @@ class FirestoreService {
               snap.data()?['ownerId'] == uid &&
               building.countsAsPartner(_buildingTypeOf(snap.data())))
           .length;
+      if (needsNeighbor &&
+          !neighborSnaps.any((snap) =>
+              snap.exists &&
+              snap.data()?['ownerId'] == uid &&
+              building.requiresNeighbor
+                  .contains(_buildingTypeOf(snap.data())))) {
+        return 'A ${building.name} needs a bordering naval base of yours.';
+      }
       if (building.suppliedBy.isNotEmpty && trades == 0) {
         return 'A ${building.name} needs a bordering rig or oil field of yours.';
       }
@@ -685,15 +712,24 @@ class FirestoreService {
     required String uid,
     required String siloId,
     required String targetId,
+    Iterable<String> siloNeighborIds = const [],
   }) async {
     final siloRef = _provincesRef(gameId).doc(siloId);
     final targetRef = _provincesRef(gameId).doc(targetId);
     final attackerRef = _playerRef(gameId, uid);
+    final siloNeighborRefs = [
+      for (final id in siloNeighborIds.toSet()..remove(siloId))
+        _provincesRef(gameId).doc(id),
+    ];
 
     final error = await _db.runTransaction<String?>((tx) async {
       final siloSnap = await tx.get(siloRef);
       final targetSnap = await tx.get(targetRef);
       final attackerSnap = await tx.get(attackerRef);
+      final siloNeighborSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in siloNeighborRefs) {
+        siloNeighborSnaps.add(await tx.get(ref));
+      }
 
       final silo = siloSnap.data();
       final target = targetSnap.data();
@@ -732,6 +768,12 @@ class FirestoreService {
         }
       }
 
+      // A bordering missile arsenal of the owner makes the missile cheaper.
+      final missilePrice = GameRules.missileCostWith(GameRules.arsenalCount([
+        for (final snap in siloNeighborSnaps)
+          if (snap.exists && snap.data()?['ownerId'] == uid)
+            _buildingTypeOf(snap.data()),
+      ]));
       final now = ServerClock.now();
       final siloBuilding = silo?['building'];
       final lastUsed = siloBuilding is Map ? siloBuilding['lastUsedAt'] : null;
@@ -743,7 +785,7 @@ class FirestoreService {
         }
       }
       final gold = PlayerState.fromDoc(attackerSnap).goldAt(now);
-      if (gold < GameRules.missileCost) return 'Not enough gold.';
+      if (gold < missilePrice) return 'Not enough gold.';
 
       final hitBuilding = _buildingTypeOf(target);
       if (shielded) {
@@ -757,7 +799,7 @@ class FirestoreService {
             owned: _ownedCount(attackerSnap),
             buildingIncome: _buildingIncome(attackerSnap),
             now: now,
-            spend: GameRules.missileCost.toDouble(),
+            spend: missilePrice.toDouble(),
           ),
         );
         final blocked = {
@@ -811,7 +853,7 @@ class FirestoreService {
           owned: _ownedCount(attackerSnap),
           buildingIncome: _buildingIncome(attackerSnap),
           now: now,
-          spend: GameRules.missileCost.toDouble(),
+          spend: missilePrice.toDouble(),
         ),
       );
       if (victimSnap.exists && removedIncome != 0) {
@@ -904,13 +946,22 @@ class FirestoreService {
     required String provinceId,
     required String uid,
     required UnitDef unit,
+    Iterable<String> neighborIds = const [],
   }) async {
     final provinceRef = _provincesRef(gameId).doc(provinceId);
     final playerRef = _playerRef(gameId, uid);
+    final neighborRefs = [
+      for (final id in neighborIds.toSet()..remove(provinceId))
+        _provincesRef(gameId).doc(id),
+    ];
 
     final error = await _db.runTransaction<String?>((tx) async {
       final provinceSnap = await tx.get(provinceRef);
       final playerSnap = await tx.get(playerRef);
+      final neighborSnaps = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final ref in neighborRefs) {
+        neighborSnaps.add(await tx.get(ref));
+      }
 
       final data = provinceSnap.data();
       if (!provinceSnap.exists || data?['ownerId'] != uid) {
@@ -922,8 +973,14 @@ class FirestoreService {
       }
 
       final navy = (data?['navy'] as num?)?.toDouble() ?? 0;
-      if (navy >= GameRules.maxNavy) {
-        return 'A naval base holds at most ${GameRules.maxNavy.floor()} navy.';
+      // Bordering shipyards of the owner raise the capacity (max 2 count).
+      final capacity = GameRules.maxNavyFor(GameRules.shipyardCount([
+        for (final snap in neighborSnaps)
+          if (snap.exists && snap.data()?['ownerId'] == uid)
+            _buildingTypeOf(snap.data()),
+      ]));
+      if (navy >= capacity) {
+        return 'A naval base holds at most ${capacity.floor()} navy.';
       }
       final now = ServerClock.now();
       final gold = PlayerState.fromDoc(playerSnap).goldAt(now);
@@ -931,7 +988,7 @@ class FirestoreService {
 
       // Navy can be fractional (battle leftovers), so the last point tops
       // the base up to exactly the limit instead of being refused.
-      final newNavy = (navy + unit.power).clamp(0, GameRules.maxNavy).toDouble();
+      final newNavy = (navy + unit.power).clamp(0, capacity).toDouble();
       tx.update(provinceRef, {'navy': newNavy});
       tx.update(playerRef, {
         'gold': gold - unit.cost,
@@ -2426,6 +2483,16 @@ class FirestoreService {
     final playerRef = _playerRef(gameId, uid);
     final candidates = [...spawnCandidates]..shuffle();
 
+    // The world's own prices (starting gold) and start time. A player who
+    // joins before the start waits in the lobby, and their gold only starts
+    // growing when the world starts.
+    final worldData = (await _gameRef(gameId).get()).data();
+    GameRules.applyWorldConfig(worldData);
+    final startsAt = startingTimeOf(worldData);
+    final goldClock = startsAt != null && startsAt.isAfter(ServerClock.now())
+        ? Timestamp.fromDate(startsAt)
+        : FieldValue.serverTimestamp();
+
     // A color belongs to the first player who picked it in this world.
     final taken = await _gameRef(gameId)
         .collection('players')
@@ -2466,7 +2533,7 @@ class FirestoreService {
           'joinedAt': FieldValue.serverTimestamp(),
           // Idle-style resource: a snapshot plus the time it was taken.
           'gold': GameRules.startingGold.toDouble(),
-          'goldUpdatedAt': FieldValue.serverTimestamp(),
+          'goldUpdatedAt': goldClock,
           'ownedCount': 1,
           'buildingIncome': 0.0,
           'goldRate': GameRules.incomeRate(territories: 1, buildingIncome: 0),

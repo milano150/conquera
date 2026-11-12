@@ -122,7 +122,7 @@ class _InsurgencyScreenState extends State<InsurgencyScreen> {
                         const SizedBox(height: ConqueraSpace.xs),
                         Text(
                           'The most powerful territories on the map. You '
-                          'respawn there in secret, and after 6 hours you '
+                          'respawn there in secret, and after 3 hours you '
                           'can overthrow its owner.',
                           textAlign: TextAlign.center,
                           style: ConqueraText.value.copyWith(

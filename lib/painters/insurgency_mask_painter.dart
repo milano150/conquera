@@ -16,6 +16,9 @@ class InsurgencyMaskPainter extends CustomPainter {
 
   static const double neighborDim = 0.5;
 
+  /// White laid over the hideout to make it brighter.
+  static const double hostBrightness = 0.28;
+
   InsurgencyMaskPainter({
     required this.visible,
     required this.hostId,
@@ -52,6 +55,17 @@ class InsurgencyMaskPainter extends CustomPainter {
       for (final p in visible) {
         if (p.id == hostId) continue;
         canvas.drawPath(p.path.shift(Offset(i * wrapWidth, 0)), dim);
+      }
+    }
+
+    // The hideout itself is lit up, so it stands out from its neighbours.
+    final glow = Paint()
+      ..isAntiAlias = true
+      ..color = Color.fromRGBO(255, 255, 255, a * hostBrightness);
+    for (var i = 0; i < copies; i++) {
+      for (final p in visible) {
+        if (p.id != hostId) continue;
+        canvas.drawPath(p.path.shift(Offset(i * wrapWidth, 0)), glow);
       }
     }
   }

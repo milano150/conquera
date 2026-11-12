@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../config/recent_worlds.dart';
 import '../models/player_state.dart';
 import '../services/firestore_service.dart';
+import '../services/server_clock.dart';
 import '../services/world_entry.dart';
 import '../theme/conquera_theme.dart';
 import '../widgets/conquera_text_field.dart';
@@ -14,7 +17,15 @@ class _WorldInfo {
   final bool failed;
   final PlayerState? player;
 
-  const _WorldInfo({this.exists = true, this.failed = false, this.player});
+  /// When the world starts (null = no start time).
+  final DateTime? startsAt;
+
+  const _WorldInfo({
+    this.exists = true,
+    this.failed = false,
+    this.player,
+    this.startsAt,
+  });
 }
 
 /// The worlds panel that slides in from the right of the home screen: a
@@ -36,18 +47,61 @@ class _WorldsPanelState extends State<WorldsPanel> {
   final Map<String, Future<_WorldInfo>> _info = {};
   String? _enteringId;
   String? _error;
+  Timer? _tick;
+
+  /// Start time of each listed world, for the countdown on its row.
+  final Map<String, DateTime?> _starts = {};
 
   @override
   void initState() {
     super.initState();
     _reload();
+    RecentWorlds.changes.addListener(_onRecentsChanged);
+    // Ticks the "Starts in" countdowns while some world hasn't started.
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final now = ServerClock.now();
+      if (_starts.values.any((t) => t != null && t.isAfter(now))) {
+        setState(() {});
+      }
+    });
   }
 
+  @override
+  void dispose() {
+    RecentWorlds.changes.removeListener(_onRecentsChanged);
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  void _onRecentsChanged() {
+    if (mounted) _reload();
+  }
+
+  String _countdown(Duration left) {
+    final total = left.inSeconds;
+    final d = total ~/ 86400;
+    final h = (total % 86400) ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return d > 0
+        ? '${d}d ${two(h)}:${two(m)}:${two(s)}'
+        : '${two(h)}:${two(m)}:${two(s)}';
+  }
+
+  int _reloadSeq = 0;
+
+  /// Reloads the list. Only the most recently started reload may apply its
+  /// result, so an early reload (started before a world was added, e.g. when
+  /// the join dialog closes) can't overwrite a newer one with a stale list.
   Future<void> _reload() async {
+    final seq = ++_reloadSeq;
     final ids = await RecentWorlds.load();
-    if (!mounted) return;
+    if (!mounted || seq != _reloadSeq) return;
     setState(() {
       _ids = ids;
+      _starts.clear();
       _info
         ..clear()
         ..addEntries([for (final id in ids) MapEntry(id, _fetch(id))]);
@@ -63,7 +117,12 @@ class _WorldsPanelState extends State<WorldsPanel> {
         gameId: id,
         uid: FirebaseAuth.instance.currentUser!.uid,
       );
-      return _WorldInfo(player: player);
+      DateTime? startsAt;
+      try {
+        startsAt = await _service.fetchStartingTime(gameId: id);
+      } catch (_) {}
+      _starts[id] = startsAt;
+      return _WorldInfo(player: player, startsAt: startsAt);
     } catch (_) {
       return const _WorldInfo(failed: true);
     }
@@ -206,6 +265,10 @@ class _WorldsPanelState extends State<WorldsPanel> {
         final info = snap.data;
         final player = info?.player;
         final dim = info != null && (!info.exists || player == null);
+        final left = info?.startsAt?.difference(ServerClock.now());
+        final startLabel = left != null && left > Duration.zero
+            ? 'Starts in ${_countdown(left)}'
+            : null;
         return InkWell(
           splashColor: ConqueraColors.ink.withAlpha(15),
           highlightColor: ConqueraColors.ink.withAlpha(8),
@@ -220,13 +283,29 @@ class _WorldsPanelState extends State<WorldsPanel> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    id,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ConqueraText.name.copyWith(
-                      color: dim ? ConqueraColors.muted : ConqueraColors.ink,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        id,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ConqueraText.name.copyWith(
+                          color:
+                              dim ? ConqueraColors.muted : ConqueraColors.ink,
+                        ),
+                      ),
+                      if (startLabel != null)
+                        Text(
+                          startLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: ConqueraText.label.copyWith(
+                            color: ConqueraColors.accent,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: ConqueraSpace.sm),
